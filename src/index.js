@@ -15,8 +15,20 @@ app.ports.getRootPath.subscribe(async function() {
   }
 });
 
+app.ports.setName.subscribe(function(name) {
+  ipcRenderer.send("set-name", name);
+});
+
+app.ports.setEmail.subscribe(function(email) {
+  ipcRenderer.send("set-email", email);
+});
+
 app.ports.saveRoot.subscribe(function(newRootPath) {
   ipcRenderer.send("new-root", newRootPath);
+});
+
+app.ports.createProject.subscribe(function(projectData) {
+  ipcRenderer.send("new-project", projectData);
 });
 
 ipcRenderer.on("startup-config", function(e, startupConfig) {

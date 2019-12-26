@@ -1,4 +1,4 @@
-module Ui.Color exposing (complement, primary, secondary1, seconday2, white)
+module Ui.Color exposing (complement, primary, secondary1, secondary2, white)
 
 import Element exposing (Color)
 
@@ -13,8 +13,8 @@ secondary1 =
     Element.rgb255 30 159 208
 
 
-seconday2 : Color
-seconday2 =
+secondary2 : Color
+secondary2 =
     Element.rgb255 255 146 28
 
 

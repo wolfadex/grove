@@ -1,4 +1,4 @@
-module Ui exposing (button, customStyles, whiteSpacePre)
+module Ui exposing (button, customStyles, text, whiteSpacePre)
 
 import Element exposing (Attribute, Element)
 import Element.Background as Background
@@ -12,7 +12,7 @@ import Ui.Color as Color
 button : List (Attribute msg) -> { onPress : Maybe msg, label : Element msg } -> Element msg
 button attributes =
     Input.button
-        ([ Background.color Color.secondary1
+        ([ Background.color Color.secondary2
          , Border.shadow
             { blur = 10
             , color = Element.rgba 0 0 0 0.05
@@ -24,6 +24,17 @@ button attributes =
          ]
             ++ attributes
         )
+
+
+text : List (Attribute msg) -> { onChange : String -> msg, label : Element msg, value : String } -> Element msg
+text attributes { onChange, label, value } =
+    Input.text
+        ([] ++ attributes)
+        { onChange = onChange
+        , label = Input.labelAbove [] label
+        , text = value
+        , placeholder = Nothing
+        }
 
 
 whiteSpacePre : Element.Attribute msg

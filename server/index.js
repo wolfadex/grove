@@ -1,12 +1,9 @@
 // Modules to control application life and create native browser window
 const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("path");
-const fs = require("fs");
-const { promisify } = require("util");
+const { spawn } = require("child_process");
+const fs = require("fs-extra");
 const settings = require("electron-settings");
-
-const readdir = promisify(fs.readdir);
-const readFile = promisify(fs.readFile);
 
 // Keep a global reference of the window object, if you don't, the window will
 // be closed automatically when the JavaScript object is garbage collected.
@@ -99,8 +96,10 @@ async function initialize() {
   } else {
     try {
       const projects = await getProjectsFromRoot(rootPath);
+      const userName = settings.get("name");
+      const userEmail = settings.get("email");
 
-      createWindow({ rootPath, projects });
+      createWindow({ rootPath, projects, userName, userEmail });
     } catch (error) {
       devLog("Error loading root path", error);
       createWindow(null);
@@ -109,11 +108,11 @@ async function initialize() {
 }
 
 async function getProjectsFromRoot(rootPath) {
-  const filesAndDirs = await readdir(rootPath, { withFileTypes: true });
+  const filesAndDirs = await fs.readdir(rootPath, { withFileTypes: true });
   const projects = {};
 
-  for (let fileOrDir in filesAndDirs) {
-    if (fileOrDir.isDirectory()) {
+  for (let fileOrDir of filesAndDirs) {
+    if (fileOrDir.isDirectory) {
       try {
         const project = await loadProject(
           path.resolve(rootPath, fileOrDir.name),
@@ -132,7 +131,9 @@ async function getProjectsFromRoot(rootPath) {
 }
 
 async function loadProject(projectPath) {
-  const filesAndDirs = await readdir(projectPath, { withFileTypes: true });
+  console.log("Steve?");
+  const filesAndDirs = await fs.readdir(projectPath, { withFileTypes: true });
+  console.log("Steve", filesAndDirs);
   const isGroveProject = filesAndDirs.some(function(fileOrDir) {
     return fileOrDir.name === ".groverc";
   });
@@ -153,7 +154,7 @@ async function loadProject(projectPath) {
   }
 
   try {
-    const packageJsonContents = await readFile(
+    const packageJsonContents = await fs.readFile(
       path.resolve(projectPath, packageJson.name),
     );
     const { name } = JSON.parse(packageJsonContents);
@@ -169,10 +170,86 @@ ipcMain.on("new-root", async function(e, newRootPath) {
   devLog("Saved root", newRootPath);
 
   try {
-    const projects = await getProjectsFromRoot(rootPath);
+    const projects = await getProjectsFromRoot(newRootPath);
 
     e.reply("load-projects", projects);
   } catch (error) {
     devLog("New root error", error);
   }
+});
+
+ipcMain.on("new-project", async function(e, projectData) {
+  try {
+    const projectPath = path.resolve(projectData.rootPath, projectData.name);
+
+    await fs.mkdir(projectPath);
+    // Copy over template files
+    await fs.copy(path.resolve(__dirname, "template/common"), projectPath);
+    await fs.copy(path.resolve(__dirname, "template/sandbox"), projectPath);
+    // Rename .gitignore
+    await fs.move(
+      path.resolve(projectPath, "gitignore"),
+      path.resolve(projectPath, ".gitignore"),
+    );
+    // Rename .groverc
+    await fs.move(
+      path.resolve(projectPath, "groverc"),
+      path.resolve(projectPath, ".groverc"),
+    );
+    await fs.writeFile(
+      path.resolve(projectPath, "package.json"),
+      `{
+      "name": "${projectData.name}",
+      "version": "1.0.0",
+      "author": "${"Carl"}",
+      "license": "MIT",
+      "scripts": {
+        "dev": "parcel src/index.html",
+        "build": "parcel build src/index.html"
+      },
+      "devDependencies": {
+        "elm": "^0.19.1-3",
+        "elm-analyse": "^0.16.5",
+        "elm-format": "^0.8.2",
+        "elm-test": "^0.19.1-revision2",
+        "parcel-bundler": "^1.12.4",
+        "prettier": "^1.19.1"
+      }
+    }`,
+    );
+    // e.reply("project-created", projectData.name);
+  } catch (error) {
+    console.log("create error", error);
+    e.reply("error-creating-project", { name: projectData.name, error });
+  }
+});
+
+function exec(command, options) {
+  return new Promise(function(resolve, reject) {
+    const response = spawn(command, options);
+    const errors = [];
+    const datas = [];
+
+    response.stderr.on("data", function(error) {
+      errors.push(error);
+    });
+    response.stdout.on("data", function(data) {
+      datas.push(data);
+    });
+    response.on("exit", function(code) {
+      if (code === 0) {
+        resolve(datas);
+      } else {
+        reject(errors);
+      }
+    });
+  });
+}
+
+ipcMain.on("set-name", function(e, name) {
+  settings.set("userName", name);
+});
+
+ipcMain.on("set-email", function(e, email) {
+  settings.set("userEmail", email);
 });
