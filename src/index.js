@@ -56,6 +56,10 @@ app.ports.confirmDelete.subscribe(async function([
   }
 });
 
+app.ports.downloadEditor.subscribe(function(url) {
+  ipcRenderer.send("download-editor", url);
+});
+
 ipcRenderer.on("startup-config", function(e, startupConfig) {
   app.ports.mainStarted.send(startupConfig);
 });

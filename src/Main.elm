@@ -113,7 +113,6 @@ type Editor
     | VSCode
     | Atom
     | SublimeText
-    | Vim
 
 
 decodeEditor : Decoder Editor
@@ -131,9 +130,6 @@ decodeEditor =
 
                         "sublimetext" ->
                             SublimeText
-
-                        "vim" ->
-                            Vim
 
                         _ ->
                             NoEditor
@@ -156,9 +152,6 @@ encodeEditor editor =
             SublimeText ->
                 "sublimetext"
 
-            Vim ->
-                "vim"
-
 
 editorStartupCommand : Editor -> Maybe String
 editorStartupCommand editor =
@@ -174,9 +167,6 @@ editorStartupCommand editor =
 
         SublimeText ->
             Just "subl"
-
-        Vim ->
-            Just "vim"
 
 
 editorName : Editor -> String
@@ -194,8 +184,21 @@ editorName editor =
         SublimeText ->
             "Sublime Text"
 
-        Vim ->
-            "Vim"
+
+editorUrl : Editor -> String
+editorUrl editor =
+    case editor of
+        NoEditor ->
+            ""
+
+        VSCode ->
+            "https://code.visualstudio.com/"
+
+        Atom ->
+            "https://atom.io/"
+
+        SublimeText ->
+            "https://www.sublimetext.com/"
 
 
 type Msg
@@ -215,6 +218,7 @@ type Msg
     | EditorSelected Editor
     | Develop Id
     | DeleteProject Id String
+    | DownloadEditor String
 
 
 
@@ -287,6 +291,9 @@ port developProject : ( Maybe String, Id ) -> Cmd msg
 port confirmDelete : ( Id, String, String ) -> Cmd msg
 
 
+port downloadEditor : String -> Cmd msg
+
+
 
 ---- UPDATE ----
 
@@ -294,6 +301,9 @@ port confirmDelete : ( Id, String, String ) -> Cmd msg
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case ( msg, model ) of
+        ( DownloadEditor url, _ ) ->
+            ( model, downloadEditor url )
+
         ( MainStarted startupConfig, Loading ) ->
             case Json.Decode.decodeValue decodeStartup startupConfig of
                 Ok data ->
@@ -548,7 +558,7 @@ viewNewSetup { name, email } =
 
 
 viewProjectList : SharedModel -> Element Msg
-viewProjectList { projects } =
+viewProjectList { projects, editor } =
     Element.column
         [ Element.width Element.fill
         , Element.height Element.fill
@@ -577,7 +587,7 @@ viewProjectList { projects } =
                 ]
                 (projects
                     |> Dict.toList
-                    |> List.map viewProject
+                    |> List.map (viewProject editor)
                 )
             ]
         ]
@@ -617,7 +627,22 @@ viewSettings { rootPath, name, email, editor } =
             , label = Input.labelAbove [] (Element.text "Editor:")
             , options =
                 List.map
-                    (\e -> Input.option e (Element.text (editorName e)))
+                    (\ed ->
+                        Input.option
+                            ed
+                            (Element.row
+                                [ Element.spacing 8
+                                , Element.padding 8
+                                ]
+                                [ Input.button
+                                    [ Font.underline ]
+                                    { onPress = Just (DownloadEditor (editorUrl ed))
+                                    , label = Element.text "Download"
+                                    }
+                                , Element.text (editorName ed)
+                                ]
+                            )
+                    )
                     editorOptions
             }
         , Ui.button
@@ -632,11 +657,11 @@ viewSettings { rootPath, name, email, editor } =
 
 editorOptions : List Editor
 editorOptions =
-    [ VSCode, Atom, SublimeText, Vim ]
+    [ VSCode, Atom, SublimeText ]
 
 
-viewProject : ( Id, Project ) -> ( String, Element Msg )
-viewProject ( id, { localName } ) =
+viewProject : Editor -> ( Id, Project ) -> ( String, Element Msg )
+viewProject editor ( id, { localName } ) =
     ( id
     , Element.row
         [ Element.width Element.fill
@@ -648,9 +673,17 @@ viewProject ( id, { localName } ) =
         [ Element.text localName
         , Ui.button
             []
-            { onPress = Develop id
-            , label = Element.text "Develop"
-            }
+            (case editor of
+                NoEditor ->
+                    { onPress = ShowSettings
+                    , label = Element.text "Set Editor"
+                    }
+
+                _ ->
+                    { onPress = Develop id
+                    , label = Element.text "Develop"
+                    }
+            )
 
         -- , Ui.button
         --     []

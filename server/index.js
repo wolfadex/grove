@@ -292,8 +292,6 @@ ipcMain.on("dev-project", async function(e, [editorCmd, projectPath]) {
   if (editorCmd != null) {
     devLog("Open editor", editorCmd);
     exec(editorCmd, ["."], { cwd: projectPath });
-    // devLog("Install dependencies with yarn");
-    // await exec("yarn", { cwd: projectPath });
     devLog("Install dependencies with pnpm.");
     await pnpm(["install"]);
 
@@ -343,4 +341,8 @@ ipcMain.on("test-project", function(e, projectPath) {
 
 ipcMain.on("build-project", function(e, projectPath) {
   // TODO:
+});
+
+ipcMain.on("download-editor", function(e, url) {
+  shell.openExternal(url);
 });
