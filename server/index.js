@@ -264,3 +264,19 @@ ipcMain.on("set-name", function(e, name) {
 ipcMain.on("set-email", function(e, email) {
   settings.set("email", email);
 });
+
+ipcMain.on("dev-project", function(e, projectPath) {
+  // TODO:
+});
+
+ipcMain.on("delete-project", function(e, projectPath) {
+  // TODO:
+});
+
+ipcMain.on("test-project", function(e, projectPath) {
+  // TODO:
+});
+
+ipcMain.on("build-project", function(e, projectPath) {
+  // TODO:
+});
