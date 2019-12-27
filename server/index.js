@@ -1,9 +1,12 @@
 // Modules to control application life and create native browser window
-const { app, BrowserWindow, ipcMain } = require("electron");
+const { app, BrowserWindow, ipcMain, shell } = require("electron");
 const path = require("path");
 const { spawn } = require("child_process");
 const fs = require("fs-extra");
 const settings = require("electron-settings");
+const pnpm = require("@pnpm/exec").default;
+const Bundler = require("parcel-bundler");
+const templates = require("./templates.js");
 
 // Keep a global reference of the window object, if you don't, the window will
 // be closed automatically when the JavaScript object is garbage collected.
@@ -56,7 +59,10 @@ app.on("ready", initialize);
 app.on("window-all-closed", function() {
   // On macOS it is common for applications and their menu bar
   // to stay active until the user quits explicitly with Cmd + Q
-  if (process.platform !== "darwin") app.quit();
+  if (process.platform !== "darwin") {
+    killAllServers();
+    app.quit();
+  }
 });
 
 app.on("activate", function() {
@@ -98,8 +104,9 @@ async function initialize() {
       const projects = await getProjectsFromRoot(rootPath);
       const userName = settings.get("name");
       const userEmail = settings.get("email");
+      const editor = settings.get("editor");
 
-      createWindow({ rootPath, projects, userName, userEmail });
+      createWindow({ rootPath, projects, userName, userEmail, editor });
     } catch (error) {
       devLog("Error loading root path", error);
       createWindow(null);
@@ -183,7 +190,6 @@ ipcMain.on("new-project", async function(e, projectData) {
     await fs.mkdir(projectPath);
     // Copy over template files
     await fs.copy(path.resolve(__dirname, "template/common"), projectPath);
-    await fs.copy(path.resolve(__dirname, "template/sandbox"), projectPath);
     // Rename .gitignore
     await fs.move(
       path.resolve(projectPath, "gitignore"),
@@ -194,31 +200,35 @@ ipcMain.on("new-project", async function(e, projectData) {
       path.resolve(projectPath, "groverc"),
       path.resolve(projectPath, ".groverc"),
     );
+    // Create README
+    await fs.writeFile(
+      path.resolve(projectPath, "README.md"),
+      templates.readme(projectData.name),
+    );
+    // Create index.html
+    await fs.writeFile(
+      path.resolve(projectPath, "src/index.html"),
+      templates.html(projectData.name),
+    );
+    // Create Elm file
+    await fs.writeFile(
+      path.resolve(projectPath, "src/Main.elm"),
+      templates.elmSandbox(projectData.name),
+    );
+    // Create package.json
     await fs.writeFile(
       path.resolve(projectPath, "package.json"),
-      `{
-  "name": "${projectData.name}",
-  "version": "1.0.0",
-  "author": {
-    "name": "${projectData.userName}",
-    "email": "${projectData.userEmail}"
-  },
-  "license": "MIT",
-  "scripts": {
-    "dev": "parcel src/index.html",
-    "build": "parcel build src/index.html"
-  },
-  "devDependencies": {
-    "elm": "^0.19.1-3",
-    "elm-analyse": "^0.16.5",
-    "elm-format": "^0.8.2",
-    "elm-test": "^0.19.1-revision2",
-    "parcel-bundler": "^1.12.4",
-    "prettier": "^1.19.1"
-  }
-}`,
+      templates.packageJson(
+        projectData.name,
+        projectData.userName,
+        projectData.userEmail,
+      ),
     );
-    await exec("yarn", { cwd: projectPath });
+
+    devLog("Use Parcel to bundle it once in preparation for development");
+    const entryFile = path.join(projectPath, "src/index.html");
+    const bundler = new Bundler(entryFile, { watch: false, minify: false });
+    await bundler.bundle();
 
     try {
       const projects = await getProjectsFromRoot(projectData.rootPath);
@@ -235,9 +245,10 @@ ipcMain.on("new-project", async function(e, projectData) {
   }
 });
 
-function exec(command, options) {
+function exec(command, args, options) {
   return new Promise(function(resolve, reject) {
-    const response = spawn(command, options);
+    console.log(command);
+    const response = spawn(command, args, options);
     const errors = [];
     const datas = [];
 
@@ -265,12 +276,65 @@ ipcMain.on("set-email", function(e, email) {
   settings.set("email", email);
 });
 
-ipcMain.on("dev-project", function(e, projectPath) {
-  // TODO:
+ipcMain.on("save-editor", function(e, editor) {
+  settings.set("editor", editor);
 });
 
-ipcMain.on("delete-project", function(e, projectPath) {
-  // TODO:
+const parcelServers = {};
+
+function killAllServers() {
+  Object.values(parcelServers).forEach(function(server) {
+    server.close();
+  });
+}
+
+ipcMain.on("dev-project", async function(e, [editorCmd, projectPath]) {
+  if (editorCmd != null) {
+    devLog("Open editor", editorCmd);
+    exec(editorCmd, ["."], { cwd: projectPath });
+    // devLog("Install dependencies with yarn");
+    // await exec("yarn", { cwd: projectPath });
+    devLog("Install dependencies with pnpm.");
+    await pnpm(["install"]);
+
+    if (parcelServers[projectPath] == null) {
+      devLog("Start parcel");
+      const entryFile = path.join(projectPath, "src/index.html");
+      const bundler = new Bundler(entryFile, { watch: true, minify: false });
+      const server = await bundler.serve();
+      parcelServers[projectPath] = server;
+      shell.openExternal(`http://localhost:${server.address().port}`);
+    } else {
+      devLog("Parcel already running for this project");
+      shell.openExternal(
+        `http://localhost:${parcelServers[projectPath].address().port}`,
+      );
+    }
+  }
+});
+
+ipcMain.on("stop-project-server", function(e, projectPath) {
+  const server = parcelServers[projectPath];
+
+  if (server) {
+    server.close();
+    delete parcelServers[projectPath];
+  }
+});
+
+ipcMain.on("delete-confirmed", async function(e, [projectPath, rootPath]) {
+  await fs.remove(projectPath);
+
+  const projects = await getProjectsFromRoot(rootPath);
+
+  e.reply("load-projects", projects);
+
+  const server = parcelServers[projectPath];
+
+  if (server != null) {
+    server.close();
+    delete parcelServers[projectPath];
+  }
 });
 
 ipcMain.on("test-project", function(e, projectPath) {

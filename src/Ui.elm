@@ -9,8 +9,8 @@ import Html.Attributes
 import Ui.Color as Color
 
 
-button : List (Attribute msg) -> { onPress : Maybe msg, label : Element msg } -> Element msg
-button attributes =
+button : List (Attribute msg) -> { onPress : msg, label : Element msg } -> Element msg
+button attributes { onPress, label } =
     Input.button
         ([ Background.color Color.secondary2
          , Border.shadow
@@ -24,6 +24,9 @@ button attributes =
          ]
             ++ attributes
         )
+        { onPress = Just onPress
+        , label = label
+        }
 
 
 text : List (Attribute msg) -> { onChange : String -> msg, label : Element msg, value : String } -> Element msg

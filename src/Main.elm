@@ -6,6 +6,7 @@ import Element exposing (Element)
 import Element.Background as Background
 import Element.Border as Border
 import Element.Font as Font
+import Element.Input as Input
 import Element.Keyed as Keyed
 import Html exposing (Html)
 import Json.Decode exposing (Decoder, Value)
@@ -47,6 +48,7 @@ type alias SharedModel =
     , rootPath : String
     , name : String
     , email : String
+    , editor : Editor
     }
 
 
@@ -56,6 +58,7 @@ baseSharedModel { name, email } =
     , rootPath = ""
     , name = name
     , email = email
+    , editor = NoEditor
     }
 
 
@@ -105,6 +108,96 @@ type alias Project =
     }
 
 
+type Editor
+    = NoEditor
+    | VSCode
+    | Atom
+    | SublimeText
+    | Vim
+
+
+decodeEditor : Decoder Editor
+decodeEditor =
+    Json.Decode.string
+        |> Json.Decode.andThen
+            (\str ->
+                Json.Decode.succeed <|
+                    case str of
+                        "vscode" ->
+                            VSCode
+
+                        "atom" ->
+                            Atom
+
+                        "sublimetext" ->
+                            SublimeText
+
+                        "vim" ->
+                            Vim
+
+                        _ ->
+                            NoEditor
+            )
+
+
+encodeEditor : Editor -> Value
+encodeEditor editor =
+    Json.Encode.string <|
+        case editor of
+            NoEditor ->
+                "none"
+
+            VSCode ->
+                "vscode"
+
+            Atom ->
+                "atom"
+
+            SublimeText ->
+                "sublimetext"
+
+            Vim ->
+                "vim"
+
+
+editorStartupCommand : Editor -> Maybe String
+editorStartupCommand editor =
+    case editor of
+        NoEditor ->
+            Nothing
+
+        VSCode ->
+            Just "code"
+
+        Atom ->
+            Just "atom"
+
+        SublimeText ->
+            Just "subl"
+
+        Vim ->
+            Just "vim"
+
+
+editorName : Editor -> String
+editorName editor =
+    case editor of
+        NoEditor ->
+            "No Editor"
+
+        VSCode ->
+            "Visual Studio Code"
+
+        Atom ->
+            "Atom"
+
+        SublimeText ->
+            "Sublime Text"
+
+        Vim ->
+            "Vim"
+
+
 type Msg
     = MainStarted Value
     | SetName String
@@ -119,6 +212,9 @@ type Msg
     | SetNewProjectName String
     | CreateNewProject
     | ProjectCreated String
+    | EditorSelected Editor
+    | Develop Id
+    | DeleteProject Id String
 
 
 
@@ -182,6 +278,15 @@ port setName : String -> Cmd msg
 port setEmail : String -> Cmd msg
 
 
+port saveEditor : Value -> Cmd msg
+
+
+port developProject : ( Maybe String, Id ) -> Cmd msg
+
+
+port confirmDelete : ( Id, String, String ) -> Cmd msg
+
+
 
 ---- UPDATE ----
 
@@ -194,8 +299,8 @@ update msg model =
                 Ok data ->
                     ( ProjectList data, Cmd.none )
 
-                Err _ ->
-                    ( NewSetup { name = "", email = "" }, Cmd.none )
+                Err err ->
+                    Debug.log (Json.Decode.errorToString err) ( NewSetup { name = "", email = "" }, Cmd.none )
 
         ( SetName name, NewSetup data ) ->
             ( NewSetup { data | name = name }, Cmd.none )
@@ -296,17 +401,53 @@ update msg model =
             else
                 ( model, Cmd.none )
 
+        ( EditorSelected editor, Settings sharedData ) ->
+            ( Settings { sharedData | editor = editor }
+            , editor
+                |> encodeEditor
+                |> saveEditor
+            )
+
+        ( EditorSelected editor, ProjectList sharedData ) ->
+            ( ProjectList { sharedData | editor = editor }
+            , editor
+                |> encodeEditor
+                |> saveEditor
+            )
+
+        ( EditorSelected editor, NewProject sharedData newProject ) ->
+            ( NewProject { sharedData | editor = editor } newProject
+            , editor
+                |> encodeEditor
+                |> saveEditor
+            )
+
+        ( Develop id, ProjectList sharedData ) ->
+            ( model, developProject ( editorStartupCommand sharedData.editor, id ) )
+
+        ( DeleteProject id name, ProjectList sharedData ) ->
+            ( model, confirmDelete ( id, name, sharedData.rootPath ) )
+
         _ ->
             ( model, Cmd.none )
 
 
 decodeStartup : Decoder SharedModel
 decodeStartup =
-    Json.Decode.map4 SharedModel
+    Json.Decode.map5
+        (\projects rootPath name email maybeEditor ->
+            { projects = projects
+            , rootPath = rootPath
+            , name = name
+            , email = email
+            , editor = Maybe.withDefault NoEditor maybeEditor
+            }
+        )
         (Json.Decode.field "projects" decodeProjects)
         (Json.Decode.field "rootPath" Json.Decode.string)
         (Json.Decode.field "userName" Json.Decode.string)
         (Json.Decode.field "userEmail" Json.Decode.string)
+        (Json.Decode.maybe (Json.Decode.field "editor" decodeEditor))
 
 
 decodeProjects : Decoder (Dict Id Project)
@@ -399,7 +540,7 @@ viewNewSetup { name, email } =
                 [ Element.text "Finally, you need to"
                 , Ui.button
                     [ Element.centerX ]
-                    { onPress = Just GetRootDirectory
+                    { onPress = GetRootDirectory
                     , label = Element.text "Set Your Root Directory"
                     }
                 ]
@@ -415,7 +556,7 @@ viewProjectList { projects } =
         ]
         [ Ui.button
             [ Element.alignRight ]
-            { onPress = Just ShowSettings
+            { onPress = ShowSettings
             , label = Element.text "Settings"
             }
         , Element.column
@@ -427,7 +568,7 @@ viewProjectList { projects } =
             ]
             [ Ui.button
                 [ Element.centerX ]
-                { onPress = Just ShowNewProjectForm
+                { onPress = ShowNewProjectForm
                 , label = Element.text "New Project"
                 }
             , Keyed.column
@@ -443,7 +584,7 @@ viewProjectList { projects } =
 
 
 viewSettings : SharedModel -> Element Msg
-viewSettings { rootPath, name, email } =
+viewSettings { rootPath, name, email, editor } =
     Element.column
         [ Element.height Element.fill
         , Background.color Color.secondary1
@@ -460,17 +601,38 @@ viewSettings { rootPath, name, email } =
             ]
         , Ui.button
             []
-            { onPress = Just GetRootDirectory
+            { onPress = GetRootDirectory
             , label = Element.text "Change Root"
+            }
+        , Input.radio
+            []
+            { onChange = EditorSelected
+            , selected =
+                case editor of
+                    NoEditor ->
+                        Nothing
+
+                    editorSelected ->
+                        Just editorSelected
+            , label = Input.labelAbove [] (Element.text "Editor:")
+            , options =
+                List.map
+                    (\e -> Input.option e (Element.text (editorName e)))
+                    editorOptions
             }
         , Ui.button
             [ Element.alignBottom
             , Element.alignRight
             ]
-            { onPress = Just HideSettings
+            { onPress = HideSettings
             , label = Element.text "Back"
             }
         ]
+
+
+editorOptions : List Editor
+editorOptions =
+    [ VSCode, Atom, SublimeText, Vim ]
 
 
 viewProject : ( Id, Project ) -> ( String, Element Msg )
@@ -486,24 +648,25 @@ viewProject ( id, { localName } ) =
         [ Element.text localName
         , Ui.button
             []
-            { onPress = Nothing
+            { onPress = Develop id
             , label = Element.text "Develop"
             }
-        , Ui.button
-            []
-            { onPress = Nothing
-            , label = Element.text "Test"
-            }
-        , Ui.button
-            []
-            { onPress = Nothing
-            , label = Element.text "Build"
-            }
+
+        -- , Ui.button
+        --     []
+        --     { onPress = Nothing
+        --     , label = Element.text "Test"
+        --     }
+        -- , Ui.button
+        --     []
+        --     { onPress = Nothing
+        --     , label = Element.text "Build"
+        --     }
         , Ui.button
             [ Element.alignRight
             , Background.color Color.complement
             ]
-            { onPress = Nothing
+            { onPress = DeleteProject id localName
             , label = Element.text "Delete"
             }
         ]
@@ -558,17 +721,12 @@ viewNewProject projectBuilder =
             ]
             [ Ui.button
                 []
-                { onPress = Just HideNewProjectForm
+                { onPress = HideNewProjectForm
                 , label = Element.text "Cancel"
                 }
             , Ui.button
                 [ Background.color Color.primary ]
-                { onPress =
-                    if creating then
-                        Nothing
-
-                    else
-                        Just CreateNewProject
+                { onPress = CreateNewProject
                 , label =
                     Element.text <|
                         if creating then

@@ -31,6 +31,31 @@ app.ports.createProject.subscribe(function(projectData) {
   ipcRenderer.send("new-project", projectData);
 });
 
+app.ports.saveEditor.subscribe(function(editor) {
+  ipcRenderer.send("save-editor", editor);
+});
+
+app.ports.developProject.subscribe(function(args) {
+  ipcRenderer.send("dev-project", args);
+});
+
+app.ports.confirmDelete.subscribe(async function([
+  projectPath,
+  name,
+  rootPath,
+]) {
+  const { response } = await remote.dialog.showMessageBox({
+    type: "question",
+    buttons: ["Cancel", "Delete"],
+    title: "Delete Project?",
+    message: `Are you sure you want to delete ${name}?`,
+  });
+
+  if (response === 1) {
+    ipcRenderer.send("delete-confirmed", [projectPath, rootPath]);
+  }
+});
+
 ipcRenderer.on("startup-config", function(e, startupConfig) {
   app.ports.mainStarted.send(startupConfig);
 });
