@@ -112,12 +112,12 @@ async function getProjectsFromRoot(rootPath) {
   const projects = {};
 
   for (let fileOrDir of filesAndDirs) {
-    if (fileOrDir.isDirectory) {
+    if (fileOrDir.isDirectory && fileOrDir.name !== ".DS_Store") {
       try {
-        const project = await loadProject(
-          path.resolve(rootPath, fileOrDir.name),
-        );
-        projects[project.name] = {
+        const projectPath = path.resolve(rootPath, fileOrDir.name);
+        const project = await loadProject(projectPath);
+
+        projects[projectPath] = {
           ...project,
           directoryName: fileOrDir.name,
         };
@@ -131,9 +131,7 @@ async function getProjectsFromRoot(rootPath) {
 }
 
 async function loadProject(projectPath) {
-  console.log("Steve?");
   const filesAndDirs = await fs.readdir(projectPath, { withFileTypes: true });
-  console.log("Steve", filesAndDirs);
   const isGroveProject = filesAndDirs.some(function(fileOrDir) {
     return fileOrDir.name === ".groverc";
   });
@@ -199,25 +197,38 @@ ipcMain.on("new-project", async function(e, projectData) {
     await fs.writeFile(
       path.resolve(projectPath, "package.json"),
       `{
-      "name": "${projectData.name}",
-      "version": "1.0.0",
-      "author": "${"Carl"}",
-      "license": "MIT",
-      "scripts": {
-        "dev": "parcel src/index.html",
-        "build": "parcel build src/index.html"
-      },
-      "devDependencies": {
-        "elm": "^0.19.1-3",
-        "elm-analyse": "^0.16.5",
-        "elm-format": "^0.8.2",
-        "elm-test": "^0.19.1-revision2",
-        "parcel-bundler": "^1.12.4",
-        "prettier": "^1.19.1"
-      }
-    }`,
+  "name": "${projectData.name}",
+  "version": "1.0.0",
+  "author": {
+    "name": "${projectData.userName}",
+    "email": "${projectData.userEmail}"
+  },
+  "license": "MIT",
+  "scripts": {
+    "dev": "parcel src/index.html",
+    "build": "parcel build src/index.html"
+  },
+  "devDependencies": {
+    "elm": "^0.19.1-3",
+    "elm-analyse": "^0.16.5",
+    "elm-format": "^0.8.2",
+    "elm-test": "^0.19.1-revision2",
+    "parcel-bundler": "^1.12.4",
+    "prettier": "^1.19.1"
+  }
+}`,
     );
-    // e.reply("project-created", projectData.name);
+    await exec("yarn", { cwd: projectPath });
+
+    try {
+      const projects = await getProjectsFromRoot(projectData.rootPath);
+
+      e.reply("load-projects", projects);
+    } catch (error) {
+      devLog("Re-get projects error", error);
+    }
+
+    e.reply("project-created", projectData.name);
   } catch (error) {
     console.log("create error", error);
     e.reply("error-creating-project", { name: projectData.name, error });
@@ -247,9 +258,9 @@ function exec(command, options) {
 }
 
 ipcMain.on("set-name", function(e, name) {
-  settings.set("userName", name);
+  settings.set("name", name);
 });
 
 ipcMain.on("set-email", function(e, email) {
-  settings.set("userEmail", email);
+  settings.set("email", email);
 });

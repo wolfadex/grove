@@ -68,11 +68,13 @@ type alias NewProjectModel =
     { name : String }
 
 
-encodeNewProject : String -> NewProjectModel -> Value
-encodeNewProject rootPath { name } =
+encodeNewProject : SharedModel -> NewProjectModel -> Value
+encodeNewProject model { name } =
     Json.Encode.object
         [ ( "name", Json.Encode.string name )
-        , ( "rootPath", Json.Encode.string rootPath )
+        , ( "rootPath", Json.Encode.string model.rootPath )
+        , ( "userName", Json.Encode.string model.name )
+        , ( "userEmail", Json.Encode.string model.email )
         ]
 
 
@@ -103,11 +105,6 @@ type alias Project =
     }
 
 
-type Collapsible
-    = Expanded
-    | Collapsed
-
-
 type Msg
     = MainStarted Value
     | SetName String
@@ -121,6 +118,7 @@ type Msg
     | HideNewProjectForm
     | SetNewProjectName String
     | CreateNewProject
+    | ProjectCreated String
 
 
 
@@ -144,6 +142,7 @@ subscriptions _ =
         [ mainStarted MainStarted
         , setRootPath SetRootPath
         , loadProjects LoadProjects
+        , projectCreated ProjectCreated
         ]
 
 
@@ -159,6 +158,9 @@ port setRootPath : (String -> msg) -> Sub msg
 
 
 port loadProjects : (Value -> msg) -> Sub msg
+
+
+port projectCreated : (String -> msg) -> Sub msg
 
 
 
@@ -275,22 +277,24 @@ update msg model =
                 Creating _ ->
                     ( model, Cmd.none )
 
-        ( CreateNewProject, NewProject sharedData newProject ) ->
-            case newProject of
-                Building data _ ->
-                    case parseNewProject data of
-                        Ok project ->
-                            ( NewProject sharedData (Creating data)
-                            , project
-                                |> encodeNewProject sharedData.rootPath
-                                |> createProject
-                            )
+        ( CreateNewProject, NewProject sharedData (Building data _) ) ->
+            case parseNewProject data of
+                Ok project ->
+                    ( NewProject sharedData (Creating data)
+                    , project
+                        |> encodeNewProject sharedData
+                        |> createProject
+                    )
 
-                        Err err ->
-                            ( NewProject sharedData (Building data (Just err)), Cmd.none )
+                Err err ->
+                    ( NewProject sharedData (Building data (Just err)), Cmd.none )
 
-                Creating _ ->
-                    ( model, Cmd.none )
+        ( ProjectCreated name, NewProject sharedData (Creating data) ) ->
+            if name == data.name then
+                ( ProjectList sharedData, Cmd.none )
+
+            else
+                ( model, Cmd.none )
 
         _ ->
             ( model, Cmd.none )
@@ -509,13 +513,13 @@ viewProject ( id, { localName } ) =
 viewNewProject : NewProjectBuilder -> Element Msg
 viewNewProject projectBuilder =
     let
-        ( projectData, error ) =
+        ( projectData, error, creating ) =
             case projectBuilder of
                 Building data err ->
-                    ( data, err )
+                    ( data, err, False )
 
                 Creating data ->
-                    ( data, Nothing )
+                    ( data, Nothing, True )
     in
     Element.column
         [ Element.width (Element.fill |> Element.maximum 500)
@@ -559,8 +563,19 @@ viewNewProject projectBuilder =
                 }
             , Ui.button
                 [ Background.color Color.primary ]
-                { onPress = Just CreateNewProject
-                , label = Element.text "Create"
+                { onPress =
+                    if creating then
+                        Nothing
+
+                    else
+                        Just CreateNewProject
+                , label =
+                    Element.text <|
+                        if creating then
+                            "Creating..."
+
+                        else
+                            "Create"
                 }
             ]
         ]

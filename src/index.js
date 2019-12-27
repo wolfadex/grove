@@ -38,3 +38,7 @@ ipcRenderer.on("startup-config", function(e, startupConfig) {
 ipcRenderer.on("load-projects", function(e, projects) {
   app.ports.loadProjects.send(projects);
 });
+
+ipcRenderer.on("project-created", function(e, name) {
+  app.ports.projectCreated.send(name);
+});
