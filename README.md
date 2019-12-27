@@ -4,6 +4,10 @@
 
 A tool for those who don't like to or don't want to use the command line for their Elm projects.
 
+![project list](project_list.png)
+
+![project create](project_create.png)
+
 ## Features:
 - [x] Create project
 - [x] Edit project (open in the editor of your choice)
