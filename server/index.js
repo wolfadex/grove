@@ -6,6 +6,7 @@ const fs = require("fs-extra");
 const settings = require("electron-settings");
 const pnpm = require("@pnpm/exec").default;
 const Bundler = require("parcel-bundler");
+const elmLicenseFinder = require("elm-license-finder");
 const templates = require("./templates.js");
 
 // Keep a global reference of the window object, if you don't, the window will
@@ -175,10 +176,11 @@ async function loadProject(projectPath) {
     const { name } = JSON.parse(packageJsonContents);
     const groverc = await fs.readFile(path.resolve(projectPath, ".groverc"));
     const { icon } = JSON.parse(groverc);
-    const elmJsonContents = await fs.readFile(
-      path.resolve(projectPath, elmJson.name),
-    );
-    const { dependencies } = JSON.parse(elmJsonContents);
+    // const elmJsonContents = await fs.readFile(
+    //   path.resolve(projectPath, elmJson.name),
+    // );
+    // const { dependencies } = JSON.parse(elmJsonContents);
+    const dependencies = elmLicenseFinder(projectPath);
 
     return { projectPath, projectName: name, icon, dependencies };
   } catch (error) {

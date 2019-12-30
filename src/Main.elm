@@ -109,7 +109,7 @@ type alias Project =
     , localName : String
     , name : String
     , icon : Icon
-    , dependencies : { direct : Dict Name Dependency, indirect : Dict Name Dependency }
+    , dependencies : Dict Name Dependency
     }
 
 
@@ -119,7 +119,14 @@ type alias Name =
 
 type alias Dependency =
     { version : Version
+    , license : String
+    , type_ : DependencyType
     }
+
+
+type DependencyType
+    = Direct
+    | Indirect
 
 
 type alias Version =
@@ -516,27 +523,33 @@ decodeProject =
         (Json.Decode.field "dependencies" decodeDependencies)
 
 
-decodeDependencies : Decoder { direct : Dict Name Dependency, indirect : Dict Name Dependency }
+decodeDependencies : Decoder (Dict Name Dependency)
 decodeDependencies =
-    Json.Decode.map2
-        (\direct indirect ->
-            { direct = direct
-            , indirect = indirect
-            }
-        )
-        (Json.Decode.field "direct" decodeDependecyDict)
-        (Json.Decode.field "indirect" decodeDependecyDict)
+    Json.Decode.dict decodeDependency
 
 
-decodeDependecyDict : Decoder (Dict Name Dependency)
-decodeDependecyDict =
-    Json.Decode.dict decodeVersion
+decodeDependency : Decoder Dependency
+decodeDependency =
+    Json.Decode.map3 Dependency
+        (Json.Decode.field "version" decodeVersion)
+        (Json.Decode.field "license" Json.Decode.string)
+        (Json.Decode.field "type" decodeDependencyType)
+
+
+decodeDependencyType : Decoder DependencyType
+decodeDependencyType =
+    Json.Decode.string
         |> Json.Decode.andThen
-            (Dict.map
-                (\_ version ->
-                    { version = version }
-                )
-                >> Json.Decode.succeed
+            (\str ->
+                case str of
+                    "direct" ->
+                        Json.Decode.succeed Direct
+
+                    "indirect" ->
+                        Json.Decode.succeed Indirect
+
+                    _ ->
+                        Json.Decode.fail ("Unknown dependency type: " ++ str)
             )
 
 
@@ -802,13 +815,40 @@ viewProjectDetails editor id maybeProject =
                                 , label = Element.text "Add"
                                 }
                             ]
-                        , Element.column
-                            [ Element.spacing 8
-                            ]
-                            (dependencies.direct
-                                |> Dict.toList
-                                |> List.map viewDependency
-                            )
+                        , let
+                            filteredDependencies =
+                                dependencies
+                                    |> Dict.toList
+                                    |> List.filter (Tuple.second >> .type_ >> (==) Direct)
+                          in
+                          Element.table
+                            []
+                            { data = filteredDependencies
+                            , columns =
+                                [ { header = Element.el [ Element.padding 4 ] (Element.text "Name")
+                                  , width = Element.shrink
+                                  , view = Tuple.first >> Element.text >> Element.el [ Element.padding 4 ]
+                                  }
+                                , { header = Element.el [ Element.padding 4 ] (Element.text "Version")
+                                  , width = Element.shrink
+                                  , view = Tuple.second >> .version >> stringFromVersion >> Element.text >> Element.el [ Element.padding 4 ]
+                                  }
+                                , { header = Element.el [ Element.padding 4 ] (Element.text "License")
+                                  , width = Element.shrink
+                                  , view = Tuple.second >> .license >> Element.text >> Element.el [ Element.padding 4 ]
+                                  }
+                                ]
+                            }
+
+                        -- , Element.column
+                        --     [ Element.spacing 8
+                        --     ]
+                        --     []
+                        -- (dependencies
+                        --     |> Dict.toList
+                        --     |> List.filter (Tuple.second >> .type_ >> (==) Direct)
+                        --     |> List.map viewDependency
+                        -- )
                         ]
 
                     -- Delete button is always last
@@ -825,10 +865,10 @@ viewProjectDetails editor id maybeProject =
 
 
 viewDependency : ( Name, Dependency ) -> Element Msg
-viewDependency ( name, { version } ) =
+viewDependency ( name, { version, license } ) =
     Element.el
         [ Element.paddingXY 8 0 ]
-        (Element.text (name ++ ": " ++ stringFromVersion version))
+        (Element.text (name ++ ", " ++ stringFromVersion version ++ ", " ++ license))
 
 
 viewSettings : SharedModel -> Element Msg

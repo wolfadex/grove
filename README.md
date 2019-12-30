@@ -20,3 +20,7 @@ A tool for those who don't like to or don't want to use the command line for the
 - [ ] Run tests
 - [ ] Build for production
 - [ ] Manage Elm dependencies
+  - [x] Display dependencies
+  - [ ] Add dependency
+  - [ ] Remove dependency
+  - [ ] Upgrade dependency
