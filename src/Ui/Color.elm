@@ -1,28 +1,58 @@
-module Ui.Color exposing (complement, primary, secondary1, secondary2, white)
+module Ui.Color exposing
+    ( accentDark
+    , accentLight
+    , danger
+    , info
+    , primary
+    , shadeDark
+    , shadeLight
+    , success
+    , warning
+    )
 
 import Element exposing (Color)
 
 
 primary : Color
 primary =
-    Element.rgb255 25 230 25
+    Element.rgb255 182 167 160
 
 
-secondary1 : Color
-secondary1 =
-    Element.rgb255 30 159 208
+info : Color
+info =
+    Element.rgb255 69 64 64
 
 
-secondary2 : Color
-secondary2 =
-    Element.rgb255 255 146 28
+success : Color
+success =
+    Element.rgb255 108 173 104
 
 
-complement : Color
-complement =
-    Element.rgb255 255 28 28
+warning : Color
+warning =
+    Element.rgb255 233 157 48
 
 
-white : Color
-white =
-    Element.rgb255 245 245 245
+danger : Color
+danger =
+    Element.rgb255 244 67 54
+
+
+shadeLight : Color
+shadeLight =
+    Element.rgb255 248 249 249
+
+
+shadeDark : Color
+shadeDark =
+    Element.rgb255 73 61 67
+
+
+accentLight : Color
+accentLight =
+    Element.rgb255 242 126 49
+
+
+accentDark : Color
+accentDark =
+    Element.rgb255 86 87 68

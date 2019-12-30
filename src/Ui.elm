@@ -3,6 +3,7 @@ module Ui exposing (button, customStyles, text, whiteSpacePre)
 import Element exposing (Attribute, Element)
 import Element.Background as Background
 import Element.Border as Border
+import Element.Font as Font
 import Element.Input as Input
 import Html
 import Html.Attributes
@@ -12,13 +13,14 @@ import Ui.Color as Color
 button : List (Attribute msg) -> { onPress : msg, label : Element msg } -> Element msg
 button attributes { onPress, label } =
     Input.button
-        ([ Background.color Color.secondary2
+        ([ Background.color (Element.rgb255 153 153 153)
          , Border.shadow
             { blur = 10
             , color = Element.rgba 0 0 0 0.05
             , offset = ( 0, 2 )
             , size = 1
             }
+         , Font.color Color.shadeLight
          , Border.rounded 3
          , Element.paddingXY 16 8
          ]

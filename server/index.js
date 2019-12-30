@@ -154,7 +154,17 @@ async function loadProject(projectPath) {
 
   if (packageJson == null) {
     throw new Error(
-      "Expected to find a package.json. This Grove project seems to be corrupted or manually modified.",
+      "Expected to find package.json. This Grove project seems to be corrupted or manually modified.",
+    );
+  }
+
+  const elmJson = filesAndDirs.find(function(fileOrDir) {
+    return fileOrDir.name === "elm.json";
+  });
+
+  if (elmJson == null) {
+    throw new Error(
+      "Expected to find elm.json. This Grove project seems to be corrupted or manually modified.",
     );
   }
 
@@ -163,8 +173,14 @@ async function loadProject(projectPath) {
       path.resolve(projectPath, packageJson.name),
     );
     const { name } = JSON.parse(packageJsonContents);
+    const groverc = await fs.readFile(path.resolve(projectPath, ".groverc"));
+    const { icon } = JSON.parse(groverc);
+    const elmJsonContents = await fs.readFile(
+      path.resolve(projectPath, elmJson.name),
+    );
+    const { dependencies } = JSON.parse(elmJsonContents);
 
-    return { projectPath, projectName: name };
+    return { projectPath, projectName: name, icon, dependencies };
   } catch (error) {
     throw new Error(error);
   }
@@ -195,10 +211,10 @@ ipcMain.on("new-project", async function(e, projectData) {
       path.resolve(projectPath, "gitignore"),
       path.resolve(projectPath, ".gitignore"),
     );
-    // Rename .groverc
-    await fs.move(
-      path.resolve(projectPath, "groverc"),
+    // Create .groverc
+    await fs.writeFile(
       path.resolve(projectPath, ".groverc"),
+      templates.groverc(),
     );
     // Create README
     await fs.writeFile(

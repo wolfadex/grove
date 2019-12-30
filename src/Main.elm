@@ -2,13 +2,14 @@ port module Main exposing (main)
 
 import Browser
 import Dict exposing (Dict)
-import Element exposing (Element)
+import Element exposing (Color, Element)
 import Element.Background as Background
 import Element.Border as Border
 import Element.Font as Font
 import Element.Input as Input
 import Element.Keyed as Keyed
 import Html exposing (Html)
+import Html.Attributes
 import Json.Decode exposing (Decoder, Value)
 import Json.Encode
 import Ui
@@ -49,6 +50,7 @@ type alias SharedModel =
     , name : String
     , email : String
     , editor : Editor
+    , activeProject : Id
     }
 
 
@@ -59,6 +61,7 @@ baseSharedModel { name, email } =
     , name = name
     , email = email
     , editor = NoEditor
+    , activeProject = ""
     }
 
 
@@ -105,7 +108,39 @@ type alias Project =
     { path : String
     , localName : String
     , name : String
+    , icon : Icon
+    , dependencies : { direct : Dict Name Dependency, indirect : Dict Name Dependency }
     }
+
+
+type alias Name =
+    String
+
+
+type alias Dependency =
+    { version : Version
+    }
+
+
+type alias Version =
+    { major : Int
+    , minor : Int
+    , patch : Int
+    }
+
+
+stringFromVersion : Version -> String
+stringFromVersion { major, minor, patch } =
+    [ String.fromInt major
+    , String.fromInt minor
+    , String.fromInt patch
+    ]
+        |> String.join "."
+
+
+type Icon
+    = RandomIcon { angle : Int, color : Color }
+    | ImageIcon String
 
 
 type Editor
@@ -219,6 +254,7 @@ type Msg
     | Develop Id
     | DeleteProject Id String
     | DownloadEditor String
+    | SetActiveProject Id
 
 
 
@@ -438,19 +474,23 @@ update msg model =
         ( DeleteProject id name, ProjectList sharedData ) ->
             ( model, confirmDelete ( id, name, sharedData.rootPath ) )
 
+        ( SetActiveProject id, ProjectList sharedData ) ->
+            ( ProjectList { sharedData | activeProject = id }, Cmd.none )
+
         _ ->
             ( model, Cmd.none )
 
 
 decodeStartup : Decoder SharedModel
 decodeStartup =
-    Json.Decode.map5
-        (\projects rootPath name email maybeEditor ->
+    Json.Decode.map6
+        (\projects rootPath name email maybeEditor activeProject ->
             { projects = projects
             , rootPath = rootPath
             , name = name
             , email = email
             , editor = Maybe.withDefault NoEditor maybeEditor
+            , activeProject = activeProject
             }
         )
         (Json.Decode.field "projects" decodeProjects)
@@ -458,6 +498,7 @@ decodeStartup =
         (Json.Decode.field "userName" Json.Decode.string)
         (Json.Decode.field "userEmail" Json.Decode.string)
         (Json.Decode.maybe (Json.Decode.field "editor" decodeEditor))
+        (Json.Decode.succeed "")
 
 
 decodeProjects : Decoder (Dict Id Project)
@@ -467,10 +508,106 @@ decodeProjects =
 
 decodeProject : Decoder Project
 decodeProject =
-    Json.Decode.map3 Project
+    Json.Decode.map5 Project
         (Json.Decode.field "projectPath" Json.Decode.string)
         (Json.Decode.field "directoryName" Json.Decode.string)
         (Json.Decode.field "projectName" Json.Decode.string)
+        (Json.Decode.field "icon" decodeIcon)
+        (Json.Decode.field "dependencies" decodeDependencies)
+
+
+decodeDependencies : Decoder { direct : Dict Name Dependency, indirect : Dict Name Dependency }
+decodeDependencies =
+    Json.Decode.map2
+        (\direct indirect ->
+            { direct = direct
+            , indirect = indirect
+            }
+        )
+        (Json.Decode.field "direct" decodeDependecyDict)
+        (Json.Decode.field "indirect" decodeDependecyDict)
+
+
+decodeDependecyDict : Decoder (Dict Name Dependency)
+decodeDependecyDict =
+    Json.Decode.dict decodeVersion
+        |> Json.Decode.andThen
+            (Dict.map
+                (\_ version ->
+                    { version = version }
+                )
+                >> Json.Decode.succeed
+            )
+
+
+decodeVersion : Decoder Version
+decodeVersion =
+    Json.Decode.string
+        |> Json.Decode.andThen
+            (\str ->
+                case String.split "." str of
+                    [ major, minor, patch ] ->
+                        case ( String.toInt major, String.toInt minor, String.toInt patch ) of
+                            ( Just mj, Just mi, Just p ) ->
+                                Json.Decode.succeed
+                                    { major = mj
+                                    , minor = mi
+                                    , patch = p
+                                    }
+
+                            _ ->
+                                Json.Decode.fail "Some part of the version isn't a number"
+
+                    _ ->
+                        Json.Decode.fail "The version must be in the format 'Int.Int.Int'"
+            )
+
+
+decodeIcon : Decoder Icon
+decodeIcon =
+    Json.Decode.field "style" Json.Decode.string
+        |> Json.Decode.andThen
+            (\style ->
+                case style of
+                    "image" ->
+                        decodeImageIcon
+
+                    "random" ->
+                        decodeRandomIcon
+
+                    _ ->
+                        Json.Decode.fail ("Unknown icon style: " ++ style)
+            )
+
+
+decodeRandomIcon : Decoder Icon
+decodeRandomIcon =
+    Json.Decode.map2
+        (\angle color ->
+            RandomIcon
+                { angle = angle
+                , color = color
+                }
+        )
+        (Json.Decode.field "angle" Json.Decode.int)
+        (Json.Decode.field "color" decodeIconColor)
+
+
+decodeIconColor : Decoder Color
+decodeIconColor =
+    Json.Decode.map3
+        (\red green blue ->
+            Element.rgb255 red green blue
+        )
+        (Json.Decode.field "red" Json.Decode.int)
+        (Json.Decode.field "green" Json.Decode.int)
+        (Json.Decode.field "blue" Json.Decode.int)
+
+
+decodeImageIcon : Decoder Icon
+decodeImageIcon =
+    Json.Decode.field "uri" Json.Decode.string
+        |> Json.Decode.andThen (ImageIcon >> Json.Decode.succeed)
 
 
 
@@ -482,6 +619,7 @@ view model =
     Element.layout
         [ Element.width Element.fill
         , Element.height Element.fill
+        , Background.color Color.shadeLight
         ]
         (case model of
             Loading ->
@@ -558,49 +696,150 @@ viewNewSetup { name, email } =
 
 
 viewProjectList : SharedModel -> Element Msg
-viewProjectList { projects, editor } =
-    Element.column
-        [ Element.width Element.fill
-        , Element.height Element.fill
-        , Element.spacing 16
+viewProjectList { projects, editor, activeProject } =
+    Element.row
+        [ Element.height Element.fill
+        , Element.width Element.fill
         ]
-        [ Ui.button
-            [ Element.alignRight ]
-            { onPress = ShowSettings
-            , label = Element.text "Settings"
-            }
-        , Element.column
-            [ Element.centerX
-            , Background.color Color.secondary1
-            , Element.padding 16
+        [ Element.column
+            [ Background.color Color.primary
+            , Element.padding 8
             , Element.spacing 16
-            , Element.width (Element.shrink |> Element.minimum 800)
+            , Element.height Element.fill
             ]
             [ Ui.button
                 [ Element.centerX ]
                 { onPress = ShowNewProjectForm
-                , label = Element.text "New Project"
+                , label = Element.text "+"
                 }
             , Keyed.column
                 [ Element.spacing 8
-                , Element.width Element.fill
+                , Element.centerX
                 ]
                 (projects
                     |> Dict.toList
-                    |> List.map (viewProject editor)
+                    |> List.map (viewProjectButton activeProject)
                 )
+            , Ui.button
+                [ Element.alignBottom ]
+                { onPress = ShowSettings
+                , label = Element.text "Settings"
+                }
             ]
+        , viewProjectDetails editor activeProject (Dict.get activeProject projects)
         ]
+
+
+viewProjectDetails : Editor -> Id -> Maybe Project -> Element Msg
+viewProjectDetails editor id maybeProject =
+    Element.el
+        [ Element.height Element.fill
+        , Element.width Element.fill
+        ]
+        (case maybeProject of
+            Nothing ->
+                Ui.button
+                    [ Element.centerX
+                    , Element.centerY
+                    ]
+                    { onPress = ShowNewProjectForm
+                    , label = Element.text "Create New Project"
+                    }
+
+            Just { localName, dependencies } ->
+                Element.column
+                    [ Element.padding 16
+                    , Element.spacing 16
+                    , Element.height Element.fill
+                    , Element.width Element.fill
+                    ]
+                    [ Element.el
+                        [ Font.size 32
+                        , Font.underline
+                        ]
+                        (Element.text localName)
+                    , Element.row
+                        [ Element.padding 8
+                        , Element.spacing 16
+                        , Background.color Color.primary
+                        ]
+                        [ Ui.button
+                            [ Background.color Color.accentLight ]
+                            (case editor of
+                                NoEditor ->
+                                    { onPress = ShowSettings
+                                    , label = Element.text "Set Editor"
+                                    }
+
+                                _ ->
+                                    { onPress = Develop id
+                                    , label = Element.text "Develop"
+                                    }
+                            )
+                        , Ui.button
+                            [ Background.color Color.accentLight ]
+                            { onPress = SetActiveProject id
+                            , label = Element.text "Test"
+                            }
+                        , Ui.button
+                            [ Background.color Color.accentLight ]
+                            { onPress = SetActiveProject id
+                            , label = Element.text "Build"
+                            }
+                        ]
+                    , Element.column
+                        [ Background.color Color.primary
+                        , Element.spacing 16
+                        , Element.padding 8
+                        , Font.color Color.shadeLight
+                        ]
+                        [ Element.row
+                            [ Element.spacing 32 ]
+                            [ Element.text "Dependencies:"
+                            , Ui.button
+                                [ Background.color Color.success ]
+                                { onPress = SetActiveProject id
+                                , label = Element.text "Add"
+                                }
+                            ]
+                        , Element.column
+                            [ Element.spacing 8
+                            ]
+                            (dependencies.direct
+                                |> Dict.toList
+                                |> List.map viewDependency
+                            )
+                        ]
+
+                    -- Delete button is always last
+                    , Ui.button
+                        [ Element.alignBottom
+                        , Element.alignRight
+                        , Background.color Color.danger
+                        ]
+                        { onPress = DeleteProject id localName
+                        , label = Element.text "Delete"
+                        }
+                    ]
+        )
+
+
+viewDependency : ( Name, Dependency ) -> Element Msg
+viewDependency ( name, { version } ) =
+    Element.el
+        [ Element.paddingXY 8 0 ]
+        (Element.text (name ++ ": " ++ stringFromVersion version))
 
 
 viewSettings : SharedModel -> Element Msg
 viewSettings { rootPath, name, email, editor } =
     Element.column
-        [ Element.height Element.fill
-        , Background.color Color.secondary1
+        [ Background.color Color.primary
         , Element.spacing 16
         , Element.padding 16
         , Element.centerX
+        , Element.centerY
+        , Border.rounded 3
         ]
         [ Element.text ("Name: " ++ name)
         , Element.text ("Email: " ++ email)
@@ -660,50 +899,71 @@ editorOptions =
     [ VSCode, Atom, SublimeText ]
 
 
-viewProject : Editor -> ( Id, Project ) -> ( String, Element Msg )
-viewProject editor ( id, { localName } ) =
+viewProjectButton : Id -> ( Id, Project ) -> ( String, Element Msg )
+viewProjectButton activeProjectId ( id, { icon } ) =
     ( id
-    , Element.row
-        [ Element.width Element.fill
-        , Background.color Color.primary
-        , Element.padding 8
-        , Element.spacing 16
-        , Border.rounded 2
-        ]
-        [ Element.text localName
-        , Ui.button
-            []
-            (case editor of
-                NoEditor ->
-                    { onPress = ShowSettings
-                    , label = Element.text "Set Editor"
-                    }
+    , Input.button
+        [ Element.height (Element.px 64)
+        , Element.width (Element.px 64)
+        , Border.rounded 3
+        , Element.clip
+        , Border.solid
+        , Border.color Color.shadeDark
+        , if activeProjectId == id then
+            Border.width 4
 
-                _ ->
-                    { onPress = Develop id
-                    , label = Element.text "Develop"
-                    }
-            )
-
-        -- , Ui.button
-        --     []
-        --     { onPress = Nothing
-        --     , label = Element.text "Test"
-        --     }
-        -- , Ui.button
-        --     []
-        --     { onPress = Nothing
-        --     , label = Element.text "Build"
-        --     }
-        , Ui.button
-            [ Element.alignRight
-            , Background.color Color.complement
-            ]
-            { onPress = DeleteProject id localName
-            , label = Element.text "Delete"
-            }
+          else
+            Border.width 0
         ]
+        { onPress = Just (SetActiveProject id)
+        , label =
+            case icon of
+                RandomIcon { angle, color } ->
+                    Element.html <|
+                        Html.div
+                            [ Html.Attributes.style "height" "100%"
+                            , Html.Attributes.style "width" "100%"
+                            , Html.Attributes.style "background-size" "32px 32px"
+                            , color
+                                |> colorToHtml255String
+                                |> Html.Attributes.style "background-color"
+                            , Html.Attributes.style "background-image"
+                                ("linear-gradient("
+                                    ++ String.fromInt (angle * 45)
+                                    ++ "deg, rgba(255, 255, 255, .2) 25%, transparent 25%, transparent 50%, rgba(255, 255, 255, .2) 50%, rgba(255, 255, 255, .2) 75%, transparent 75%, transparent)"
+                                )
+                            ]
+                            []
+
+                ImageIcon _ ->
+                    Debug.todo "handle custom icon"
+        }
     )
+
+
+colorToHtml255String : Color -> String
+colorToHtml255String =
+    Element.toRgb
+        >> (\{ red, green, blue, alpha } ->
+                "rgba("
+                    ++ (red |> floatTo255 |> String.fromInt)
+                    ++ ","
+                    ++ (green |> floatTo255 |> String.fromInt)
+                    ++ ","
+                    ++ (blue |> floatTo255 |> String.fromInt)
+                    ++ ","
+                    ++ String.fromFloat alpha
+                    ++ ")"
+           )
+
+
+floatTo255 : Float -> Int
+floatTo255 float =
+    float
+        * 256
+        |> floor
+        |> min 255
+        |> max 0
 
 
 viewNewProject : NewProjectBuilder -> Element Msg
@@ -723,7 +983,7 @@ viewNewProject projectBuilder =
         , Element.padding 16
         , Element.centerX
         , Element.centerY
-        , Background.color Color.secondary1
+        , Background.color Color.primary
         ]
         [ Element.el
             [ Border.solid
@@ -758,7 +1018,7 @@ viewNewProject projectBuilder =
                 , label = Element.text "Cancel"
                 }
             , Ui.button
-                [ Background.color Color.primary ]
+                [ Background.color Color.success ]
                 { onPress = CreateNewProject
                 , label =
                     Element.text <|
