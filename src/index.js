@@ -64,10 +64,18 @@ ipcRenderer.on("startup-config", function(e, startupConfig) {
   app.ports.mainStarted.send(startupConfig);
 });
 
+ipcRenderer.on("load-project", function(e, project) {
+  app.ports.loadProject.send(project);
+});
+
 ipcRenderer.on("load-projects", function(e, projects) {
   app.ports.loadProjects.send(projects);
 });
 
 ipcRenderer.on("project-created", function(e, name) {
   app.ports.projectCreated.send(name);
+});
+
+ipcRenderer.on("delete-project", function(e, id) {
+  app.ports.projectDeleted.send(id);
 });

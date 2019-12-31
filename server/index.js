@@ -249,9 +249,11 @@ ipcMain.on("new-project", async function(e, projectData) {
     await bundler.bundle();
 
     try {
-      const projects = await getProjectsFromRoot(projectData.rootPath);
+      const project = await loadProject(projectPath);
 
-      e.reply("load-projects", projects);
+      e.reply("load-project", {
+        [projectPath]: { ...project, directoryName: projectData.name },
+      });
     } catch (error) {
       devLog("Re-get projects error", error);
     }
@@ -343,7 +345,7 @@ ipcMain.on("delete-confirmed", async function(e, [projectPath, rootPath]) {
 
   const projects = await getProjectsFromRoot(rootPath);
 
-  e.reply("load-projects", projects);
+  e.reply("delete-project", projectPath);
 
   const server = parcelServers[projectPath];
 

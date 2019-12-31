@@ -249,6 +249,7 @@ type Msg
     | SetEmail String
     | GetRootDirectory
     | SetRootPath String
+    | LoadProject Value
     | LoadProjects Value
     | ShowSettings
     | HideSettings
@@ -262,6 +263,7 @@ type Msg
     | DeleteProject Id String
     | DownloadEditor String
     | SetActiveProject Id
+    | ProjectDeleted Id
 
 
 
@@ -284,8 +286,10 @@ subscriptions _ =
     Sub.batch
         [ mainStarted MainStarted
         , setRootPath SetRootPath
+        , loadProject LoadProject
         , loadProjects LoadProjects
         , projectCreated ProjectCreated
+        , projectDeleted ProjectDeleted
         ]
 
 
@@ -300,10 +304,16 @@ port mainStarted : (Value -> msg) -> Sub msg
 port setRootPath : (String -> msg) -> Sub msg
 
 
+port loadProject : (Value -> msg) -> Sub msg
+
+
 port loadProjects : (Value -> msg) -> Sub msg
 
 
 port projectCreated : (String -> msg) -> Sub msg
+
+
+port projectDeleted : (Id -> msg) -> Sub msg
 
 
 
@@ -414,6 +424,76 @@ update msg model =
 
                 Err err ->
                     Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
+
+        ( LoadProject maybeProject, ProjectList sharedData ) ->
+            case Json.Decode.decodeValue decodeProjects maybeProject of
+                Ok project ->
+                    ( ProjectList
+                        { sharedData
+                            | projects = Dict.union project sharedData.projects
+                            , activeProject =
+                                case project |> Dict.toList |> List.head |> Maybe.map Tuple.first of
+                                    Just id ->
+                                        id
+
+                                    Nothing ->
+                                        sharedData.activeProject
+                        }
+                    , Cmd.none
+                    )
+
+                Err err ->
+                    Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
+
+        ( LoadProject maybeProject, Settings sharedData ) ->
+            case Json.Decode.decodeValue decodeProjects maybeProject of
+                Ok project ->
+                    ( Settings
+                        { sharedData
+                            | projects = Dict.union project sharedData.projects
+                            , activeProject =
+                                case project |> Dict.toList |> List.head |> Maybe.map Tuple.first of
+                                    Just id ->
+                                        id
+
+                                    Nothing ->
+                                        sharedData.activeProject
+                        }
+                    , Cmd.none
+                    )
+
+                Err err ->
+                    Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
+
+        ( LoadProject maybeProject, NewProject sharedData newProject ) ->
+            case Json.Decode.decodeValue decodeProjects maybeProject of
+                Ok project ->
+                    ( NewProject
+                        { sharedData
+                            | projects = Dict.union project sharedData.projects
+                            , activeProject =
+                                case project |> Dict.toList |> List.head |> Maybe.map Tuple.first of
+                                    Just id ->
+                                        id
+
+                                    Nothing ->
+                                        sharedData.activeProject
+                        }
+                        newProject
+                    , Cmd.none
+                    )
+
+                Err err ->
+                    Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
+
+        ( ProjectDeleted id, ProjectList sharedData ) ->
+            ( ProjectList { sharedData | projects = Dict.remove id sharedData.projects }, Cmd.none )
+
+        ( ProjectDeleted id, Settings sharedData ) ->
+            ( Settings { sharedData | projects = Dict.remove id sharedData.projects }, Cmd.none )
+
+        ( ProjectDeleted id, NewProject sharedData newProject ) ->
+            ( NewProject { sharedData | projects = Dict.remove id sharedData.projects } newProject, Cmd.none )
 
         ( ShowSettings, ProjectList sharedData ) ->
             ( Settings sharedData, Cmd.none )
