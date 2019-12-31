@@ -32,6 +32,10 @@ app.ports.downloadEditor.subscribe(function(url) {
   ipcRenderer.send("download-editor", url);
 });
 
+app.ports.ejectProject.subscribe(function(projectPath) {
+  ipcRenderer.send("eject-project", projectPath);
+});
+
 ipcRenderer.on("startup-config", function(e, startupConfig) {
   app.ports.mainStarted.send(startupConfig);
 });

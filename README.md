@@ -17,6 +17,7 @@ A tool for those who don't like to or don't want to use the command line for the
   - [ ] other
 - [x] Start a dev server when editing
 - [x] Delete projects
+- [x] Eject projects
 - [ ] Run tests
 - [ ] Build for production
 - [ ] Manage Elm dependencies

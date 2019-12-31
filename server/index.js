@@ -1,5 +1,5 @@
 // Modules to control application life and create native browser window
-const { app, BrowserWindow, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, dialog } = require("electron");
 const path = require("path");
 const { spawn } = require("child_process");
 const fs = require("fs-extra");
@@ -189,11 +189,6 @@ ipcMain.on("new-project", async function(e, projectData) {
       path.resolve(projectPath, ".groverc"),
       templates.groverc(projectData.name),
     );
-    // Create README
-    await fs.writeFile(
-      path.resolve(projectPath, "README.md"),
-      templates.readme(projectData.name),
-    );
     // Create index.html
     await fs.writeFile(
       path.resolve(projectPath, "src/index.html"),
@@ -204,15 +199,6 @@ ipcMain.on("new-project", async function(e, projectData) {
       path.resolve(projectPath, "src/Main.elm"),
       templates.elmSandbox(projectData.name),
     );
-    // Create package.json
-    // await fs.writeFile(
-    //   path.resolve(projectPath, "package.json"),
-    //   templates.packageJson(
-    //     projectData.name,
-    //     projectData.userName,
-    //     projectData.userEmail,
-    //   ),
-    // );
 
     devLog("Use Parcel to bundle it once in preparation for development");
     const entryFile = path.join(projectPath, "src/index.html");
@@ -320,6 +306,10 @@ ipcMain.on("stop-project-server", function(e, projectPath) {
 });
 
 ipcMain.on("delete-confirmed", async function(e, projectPath) {
+  deleteProject(e, projectPath);
+});
+
+async function deleteProject(e, projectPath) {
   await fs.remove(path.resolve(PROJECTS_ROOT, projectPath));
 
   e.reply("delete-project", projectPath);
@@ -330,7 +320,7 @@ ipcMain.on("delete-confirmed", async function(e, projectPath) {
     server.close();
     delete parcelServers[projectPath];
   }
-});
+}
 
 ipcMain.on("test-project", function(e, projectPath) {
   // TODO:
@@ -342,4 +332,41 @@ ipcMain.on("build-project", function(e, projectPath) {
 
 ipcMain.on("download-editor", function(e, url) {
   shell.openExternal(url);
+});
+
+ipcMain.on("eject-project", async function(e, projectPath) {
+  // Get output directory
+  const response = await dialog.showOpenDialog({
+    title: "Where to Eject to",
+    buttonLabel: "Eject",
+    properties: ["openDirectory", "createDirectory"],
+  });
+
+  if (!response.canceled) {
+    // Add remaining files needed for an ejected project
+    const groverc = await fs.readFile(
+      path.resolve(PROJECTS_ROOT, projectPath, ".groverc"),
+    );
+    const { name } = JSON.parse(groverc);
+    // Copy over eject files
+    await fs.copy(path.resolve(__dirname, "template/eject"), projectPath);
+    // Create README
+    await fs.writeFile(
+      path.resolve(projectPath, "README.md"),
+      templates.readme(name),
+    );
+    // Create package.json
+    await fs.writeFile(
+      path.resolve(projectPath, "package.json"),
+      templates.packageJson(name),
+    );
+
+    const outputPath = path.resolve(response.filePaths[0], name);
+    // Eject
+    await fs.copy(path.resolve(PROJECTS_ROOT, projectPath), outputPath);
+    // Delete old project files
+    await deleteProject(e, projectPath);
+    // Show ejected project to user
+    shell.showItemInFolder(outputPath);
+  }
 });

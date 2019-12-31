@@ -236,6 +236,7 @@ type Msg
     | DownloadEditor String
     | SetActiveProject Id
     | ProjectDeleted Id
+    | Eject Id
 
 
 
@@ -301,6 +302,9 @@ port confirmDelete : ( Id, String ) -> Cmd msg
 
 
 port downloadEditor : String -> Cmd msg
+
+
+port ejectProject : Id -> Cmd msg
 
 
 
@@ -483,6 +487,9 @@ update msg model =
 
         ( SetActiveProject id, ProjectList sharedData ) ->
             ( ProjectList { sharedData | activeProject = id }, Cmd.none )
+
+        ( Eject id, _ ) ->
+            ( model, ejectProject id )
 
         _ ->
             ( model, Cmd.none )
@@ -741,6 +748,11 @@ viewProjectDetails editor id maybeProject =
                             [ Background.color Color.accentLight ]
                             { onPress = SetActiveProject id
                             , label = Element.text "Build"
+                            }
+                        , Ui.button
+                            [ Background.color Color.warning ]
+                            { onPress = Eject id
+                            , label = Element.text "Eject"
                             }
                         ]
                     , Element.column
