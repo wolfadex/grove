@@ -19,7 +19,7 @@ A tool for those who don't like to or don't want to use the command line for the
 - [x] Delete projects
 - [x] Eject projects
 - [ ] Run tests
-- [ ] Build for production
+- [x] Build for production
 - [ ] Manage Elm dependencies
   - [x] Display dependencies
   - [ ] Add dependency
