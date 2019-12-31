@@ -36,6 +36,10 @@ app.ports.ejectProject.subscribe(function(projectPath) {
   ipcRenderer.send("eject-project", projectPath);
 });
 
+app.ports.buildProject.subscribe(function(projectPath) {
+  ipcRenderer.send("build-project", projectPath);
+});
+
 ipcRenderer.on("startup-config", function(e, startupConfig) {
   app.ports.mainStarted.send(startupConfig);
 });
@@ -54,4 +58,8 @@ ipcRenderer.on("project-created", function(e, name) {
 
 ipcRenderer.on("delete-project", function(e, id) {
   app.ports.projectDeleted.send(id);
+});
+
+ipcRenderer.on("project-built", function(e, projectPath) {
+  app.ports.projectBuilt.send(projectPath);
 });

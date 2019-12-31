@@ -200,16 +200,6 @@ ipcMain.on("new-project", async function(e, projectData) {
       templates.elmSandbox(projectData.name),
     );
 
-    devLog("Use Parcel to bundle it once in preparation for development");
-    const entryFile = path.join(projectPath, "src/index.html");
-    const bundler = new Bundler(entryFile, {
-      watch: false,
-      minify: false,
-      outDir: path.resolve(projectPath, "dist"),
-      cacheDir: path.resolve(projectPath, ".cache"),
-    });
-    await bundler.bundle();
-
     try {
       const project = await loadProject(projectPath);
 
@@ -222,7 +212,7 @@ ipcMain.on("new-project", async function(e, projectData) {
 
     e.reply("project-created", projectData.name);
   } catch (error) {
-    console.log("create error", error);
+    devLog("Create project error", error);
     e.reply("error-creating-project", { name: projectData.name, error });
   }
 });
@@ -326,8 +316,28 @@ ipcMain.on("test-project", function(e, projectPath) {
   // TODO:
 });
 
-ipcMain.on("build-project", function(e, projectPath) {
-  // TODO:
+ipcMain.on("build-project", async function(e, projectPath) {
+  // Clear an previous build
+  await fs.remove(path.resolve(PROJECTS_ROOT, projectPath, "dist"));
+
+  const entryFile = path.join(projectPath, "src/index.html");
+  const bundler = new Bundler(entryFile, {
+    watch: false,
+    minify: true,
+    outDir: path.resolve(projectPath, "dist"),
+    cacheDir: path.resolve(projectPath, ".cache"),
+    production: true,
+  });
+
+  try {
+    await bundler.bundle();
+    shell.showItemInFolder(path.join(projectPath, "dist"));
+    e.reply("project-built", projectPath);
+  } catch (error) {
+    devLog("Build error", error);
+    e.reply("project-build-error", error);
+  }
+  // TODO: Should more happen here? Maybe hookup to a static host?
 });
 
 ipcMain.on("download-editor", function(e, url) {

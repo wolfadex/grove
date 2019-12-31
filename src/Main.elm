@@ -86,6 +86,7 @@ type alias Project =
     , name : String
     , icon : Icon
     , dependencies : Dict Name Dependency
+    , building : Bool
     }
 
 
@@ -123,7 +124,6 @@ stringFromVersion { major, minor, patch } =
 
 type Icon
     = RandomIcon { angle : Int, color : Color }
-    | ImageIcon String
 
 
 type Editor
@@ -237,6 +237,8 @@ type Msg
     | SetActiveProject Id
     | ProjectDeleted Id
     | Eject Id
+    | BuildProject Id
+    | ProjectBuilt Id
 
 
 
@@ -262,6 +264,7 @@ subscriptions _ =
         , loadProjects LoadProjects
         , projectCreated ProjectCreated
         , projectDeleted ProjectDeleted
+        , projectBuilt ProjectBuilt
         ]
 
 
@@ -283,6 +286,9 @@ port projectCreated : (String -> msg) -> Sub msg
 
 
 port projectDeleted : (Id -> msg) -> Sub msg
+
+
+port projectBuilt : (Id -> msg) -> Sub msg
 
 
 
@@ -307,6 +313,9 @@ port downloadEditor : String -> Cmd msg
 port ejectProject : Id -> Cmd msg
 
 
+port buildProject : Id -> Cmd msg
+
+
 
 ---- UPDATE ----
 
@@ -322,8 +331,14 @@ update msg model =
                 Ok data ->
                     ( ProjectList data, Cmd.none )
 
-                Err err ->
-                    Debug.todo ("hanle startup decode error: " ++ Json.Decode.errorToString err)
+                Err _ ->
+                    ( ProjectList
+                        { projects = Dict.empty
+                        , editor = NoEditor
+                        , activeProject = ""
+                        }
+                    , Cmd.none
+                    )
 
         ( LoadProjects maybeProjects, ProjectList sharedData ) ->
             case Json.Decode.decodeValue decodeProjects maybeProjects of
@@ -331,7 +346,8 @@ update msg model =
                     ( ProjectList { sharedData | projects = projects }, Cmd.none )
 
                 Err err ->
-                    Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
+                    -- Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
+                    ( model, Cmd.none )
 
         ( LoadProjects maybeProjects, Settings sharedData ) ->
             case Json.Decode.decodeValue decodeProjects maybeProjects of
@@ -339,7 +355,8 @@ update msg model =
                     ( Settings { sharedData | projects = projects }, Cmd.none )
 
                 Err err ->
-                    Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
+                    -- Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
+                    ( model, Cmd.none )
 
         ( LoadProjects maybeProjects, NewProject sharedData newProject ) ->
             case Json.Decode.decodeValue decodeProjects maybeProjects of
@@ -347,7 +364,8 @@ update msg model =
                     ( NewProject { sharedData | projects = projects } newProject, Cmd.none )
 
                 Err err ->
-                    Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
+                    -- Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
+                    ( model, Cmd.none )
 
         ( LoadProject maybeProject, ProjectList sharedData ) ->
             case Json.Decode.decodeValue decodeProjects maybeProject of
@@ -367,7 +385,8 @@ update msg model =
                     )
 
                 Err err ->
-                    Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
+                    -- Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
+                    ( model, Cmd.none )
 
         ( LoadProject maybeProject, Settings sharedData ) ->
             case Json.Decode.decodeValue decodeProjects maybeProject of
@@ -387,7 +406,8 @@ update msg model =
                     )
 
                 Err err ->
-                    Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
+                    -- Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
+                    ( model, Cmd.none )
 
         ( LoadProject maybeProject, NewProject sharedData newProject ) ->
             case Json.Decode.decodeValue decodeProjects maybeProject of
@@ -408,7 +428,8 @@ update msg model =
                     )
 
                 Err err ->
-                    Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
+                    -- Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
+                    ( model, Cmd.none )
 
         ( ProjectDeleted id, ProjectList sharedData ) ->
             ( ProjectList { sharedData | projects = Dict.remove id sharedData.projects }, Cmd.none )
@@ -491,6 +512,40 @@ update msg model =
         ( Eject id, _ ) ->
             ( model, ejectProject id )
 
+        ( BuildProject id, ProjectList sharedData ) ->
+            ( ProjectList { sharedData | projects = Dict.update id (Maybe.map (\p -> { p | building = True })) sharedData.projects }
+            , buildProject id
+            )
+
+        ( BuildProject id, NewProject sharedData newProject ) ->
+            ( NewProject
+                { sharedData | projects = Dict.update id (Maybe.map (\p -> { p | building = True })) sharedData.projects }
+                newProject
+            , buildProject id
+            )
+
+        ( BuildProject id, Settings sharedData ) ->
+            ( Settings { sharedData | projects = Dict.update id (Maybe.map (\p -> { p | building = True })) sharedData.projects }
+            , buildProject id
+            )
+
+        ( ProjectBuilt id, ProjectList sharedData ) ->
+            ( ProjectList { sharedData | projects = Dict.update id (Maybe.map (\p -> { p | building = False })) sharedData.projects }
+            , Cmd.none
+            )
+
+        ( ProjectBuilt id, NewProject sharedData newProject ) ->
+            ( NewProject
+                { sharedData | projects = Dict.update id (Maybe.map (\p -> { p | building = False })) sharedData.projects }
+                newProject
+            , Cmd.none
+            )
+
+        ( ProjectBuilt id, Settings sharedData ) ->
+            ( Settings { sharedData | projects = Dict.update id (Maybe.map (\p -> { p | building = False })) sharedData.projects }
+            , Cmd.none
+            )
+
         _ ->
             ( model, Cmd.none )
 
@@ -515,12 +570,13 @@ decodeProjects =
 
 decodeProject : Decoder Project
 decodeProject =
-    Json.Decode.map5 Project
+    Json.Decode.map6 Project
         (Json.Decode.field "projectPath" Json.Decode.string)
         (Json.Decode.field "directoryName" Json.Decode.string)
         (Json.Decode.field "projectName" Json.Decode.string)
         (Json.Decode.field "icon" decodeIcon)
         (Json.Decode.field "dependencies" decodeDependencies)
+        (Json.Decode.succeed False)
 
 
 decodeDependencies : Decoder (Dict Name Dependency)
@@ -582,9 +638,6 @@ decodeIcon =
         |> Json.Decode.andThen
             (\style ->
                 case style of
-                    "image" ->
-                        decodeImageIcon
-
                     "random" ->
                         decodeRandomIcon
 
@@ -615,12 +668,6 @@ decodeIconColor =
         (Json.Decode.field "red" Json.Decode.int)
         (Json.Decode.field "green" Json.Decode.int)
         (Json.Decode.field "blue" Json.Decode.int)
-
-
-decodeImageIcon : Decoder Icon
-decodeImageIcon =
-    Json.Decode.field "uri" Json.Decode.string
-        |> Json.Decode.andThen (ImageIcon >> Json.Decode.succeed)
 
 
 
@@ -709,7 +756,7 @@ viewProjectDetails editor id maybeProject =
                     , label = Element.text "Create New Project"
                     }
 
-            Just { localName, dependencies } ->
+            Just { localName, dependencies, building } ->
                 Element.column
                     [ Element.padding 16
                     , Element.spacing 16
@@ -746,8 +793,20 @@ viewProjectDetails editor id maybeProject =
                             }
                         , Ui.button
                             [ Background.color Color.accentLight ]
-                            { onPress = SetActiveProject id
-                            , label = Element.text "Build"
+                            { onPress =
+                                if building then
+                                    SetActiveProject id
+
+                                else
+                                    BuildProject id
+                            , label =
+                                Element.text
+                                    (if building then
+                                        "Building..."
+
+                                     else
+                                        "Build"
+                                    )
                             }
                         , Ui.button
                             [ Background.color Color.warning ]
@@ -900,9 +959,6 @@ viewProjectButton activeProjectId ( id, { icon } ) =
                                 )
                             ]
                             []
-
-                ImageIcon _ ->
-                    Debug.todo "handle custom icon"
         }
     )
 
