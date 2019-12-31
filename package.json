@@ -7,7 +7,7 @@
   "license": "MIT",
   "scripts": {
     "dev": "run-p dev:renderer dev:main",
-    "dev:main": "NODE_ENV=\"development\" nodemon --watch \"server/**/*.js\" --exec \"electron .\"",
+    "dev:main": "NODE_ENV=\"development\" nodemon --ignore \"server/user_projects/**/*\" --watch \"server/**/*.js\" --exec \"electron .\"",
     "dev:renderer": "parcel watch src/index.html --target=electron --public-url=./"
   },
   "dependencies": {
@@ -24,6 +24,7 @@
     "prettier": "^1.19.1"
   },
   "devDependencies": {
+    "node-elm-compiler": "^5.0.4",
     "nodemon": "^2.0.2",
     "npm-run-all": "^4.1.5"
   }

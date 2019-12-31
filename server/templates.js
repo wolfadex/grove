@@ -60,13 +60,14 @@ function readme(name) {
 This project was created with [Grove](https://github.com/wolfadex/grove).`;
 }
 
-function groverc() {
+function groverc(name) {
   return `{
   "icon": {
     "style": "random",
     "angle": ${Math.floor(Math.random() * 9)},
     "color": ${JSON.stringify(randomColor())}
-  }
+  },
+  "name": "${name}"
 }`;
 }
 

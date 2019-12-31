@@ -4,16 +4,17 @@ const path = require("path");
 const { spawn } = require("child_process");
 const fs = require("fs-extra");
 const settings = require("electron-settings");
-const pnpm = require("@pnpm/exec").default;
 const Bundler = require("parcel-bundler");
 const elmLicenseFinder = require("elm-license-finder");
 const templates = require("./templates.js");
 
+const PROJECTS_ROOT = path.resolve(__dirname, "user_projects");
 // Keep a global reference of the window object, if you don't, the window will
 // be closed automatically when the JavaScript object is garbage collected.
 let mainWindow;
 
 function createWindow(startupConfig) {
+  const editor = settings.get("editor");
   const { x, y, width = 800, height = 600 } = settings.get("window") || {};
   // Create the browser window.
   mainWindow = new BrowserWindow({
@@ -39,7 +40,8 @@ function createWindow(startupConfig) {
   }
 
   mainWindow.webContents.on("did-finish-load", function() {
-    mainWindow.webContents.send("startup-config", startupConfig);
+    mainWindow.webContents.send("startup-config", { editor });
+    loadProjects();
   });
 
   // Emitted when the window is closed.
@@ -54,7 +56,7 @@ function createWindow(startupConfig) {
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
-app.on("ready", initialize);
+app.on("ready", createWindow);
 
 // Quit when all windows are closed.
 app.on("window-all-closed", function() {
@@ -69,7 +71,7 @@ app.on("window-all-closed", function() {
 app.on("activate", function() {
   // On macOS it's common to re-create a window in the app when the
   // dock icon is clicked and there are no other windows open.
-  if (mainWindow === null) initialize();
+  if (mainWindow === null) createWindow();
 });
 
 function devLog() {
@@ -95,34 +97,14 @@ function saveWindow() {
   }
 }
 
-async function initialize() {
-  const rootPath = settings.get("root");
-
-  if (rootPath == null) {
-    createWindow(null);
-  } else {
-    try {
-      const projects = await getProjectsFromRoot(rootPath);
-      const userName = settings.get("name");
-      const userEmail = settings.get("email");
-      const editor = settings.get("editor");
-
-      createWindow({ rootPath, projects, userName, userEmail, editor });
-    } catch (error) {
-      devLog("Error loading root path", error);
-      createWindow(null);
-    }
-  }
-}
-
-async function getProjectsFromRoot(rootPath) {
-  const filesAndDirs = await fs.readdir(rootPath, { withFileTypes: true });
+async function loadProjects() {
+  const filesAndDirs = await fs.readdir(PROJECTS_ROOT, { withFileTypes: true });
   const projects = {};
 
   for (let fileOrDir of filesAndDirs) {
-    if (fileOrDir.isDirectory && fileOrDir.name !== ".DS_Store") {
+    if (fileOrDir.isDirectory() && fileOrDir.name !== ".DS_Store") {
       try {
-        const projectPath = path.resolve(rootPath, fileOrDir.name);
+        const projectPath = path.resolve(PROJECTS_ROOT, fileOrDir.name);
         const project = await loadProject(projectPath);
 
         projects[projectPath] = {
@@ -135,7 +117,9 @@ async function getProjectsFromRoot(rootPath) {
     }
   }
 
-  return projects;
+  if (mainWindow != null) {
+    mainWindow.webContents.send("load-projects", projects);
+  }
 }
 
 async function loadProject(projectPath) {
@@ -149,15 +133,15 @@ async function loadProject(projectPath) {
     throw new Error("Expected to find a file named '.groverc'.");
   }
 
-  const packageJson = filesAndDirs.find(function(fileOrDir) {
-    return fileOrDir.name === "package.json";
-  });
+  // const packageJson = filesAndDirs.find(function(fileOrDir) {
+  //   return fileOrDir.name === "package.json";
+  // });
 
-  if (packageJson == null) {
-    throw new Error(
-      "Expected to find package.json. This Grove project seems to be corrupted or manually modified.",
-    );
-  }
+  // if (packageJson == null) {
+  //   throw new Error(
+  //     "Expected to find package.json. This Grove project seems to be corrupted or manually modified.",
+  //   );
+  // }
 
   const elmJson = filesAndDirs.find(function(fileOrDir) {
     return fileOrDir.name === "elm.json";
@@ -170,12 +154,12 @@ async function loadProject(projectPath) {
   }
 
   try {
-    const packageJsonContents = await fs.readFile(
-      path.resolve(projectPath, packageJson.name),
-    );
-    const { name } = JSON.parse(packageJsonContents);
+    // const packageJsonContents = await fs.readFile(
+    //   path.resolve(projectPath, packageJson.name),
+    // );
+    // const { name } = JSON.parse(packageJsonContents);
     const groverc = await fs.readFile(path.resolve(projectPath, ".groverc"));
-    const { icon } = JSON.parse(groverc);
+    const { icon, name } = JSON.parse(groverc);
     // const elmJsonContents = await fs.readFile(
     //   path.resolve(projectPath, elmJson.name),
     // );
@@ -188,22 +172,9 @@ async function loadProject(projectPath) {
   }
 }
 
-ipcMain.on("new-root", async function(e, newRootPath) {
-  settings.set("root", newRootPath);
-  devLog("Saved root", newRootPath);
-
-  try {
-    const projects = await getProjectsFromRoot(newRootPath);
-
-    e.reply("load-projects", projects);
-  } catch (error) {
-    devLog("New root error", error);
-  }
-});
-
 ipcMain.on("new-project", async function(e, projectData) {
   try {
-    const projectPath = path.resolve(projectData.rootPath, projectData.name);
+    const projectPath = path.resolve(PROJECTS_ROOT, projectData.name);
 
     await fs.mkdir(projectPath);
     // Copy over template files
@@ -216,7 +187,7 @@ ipcMain.on("new-project", async function(e, projectData) {
     // Create .groverc
     await fs.writeFile(
       path.resolve(projectPath, ".groverc"),
-      templates.groverc(),
+      templates.groverc(projectData.name),
     );
     // Create README
     await fs.writeFile(
@@ -234,18 +205,23 @@ ipcMain.on("new-project", async function(e, projectData) {
       templates.elmSandbox(projectData.name),
     );
     // Create package.json
-    await fs.writeFile(
-      path.resolve(projectPath, "package.json"),
-      templates.packageJson(
-        projectData.name,
-        projectData.userName,
-        projectData.userEmail,
-      ),
-    );
+    // await fs.writeFile(
+    //   path.resolve(projectPath, "package.json"),
+    //   templates.packageJson(
+    //     projectData.name,
+    //     projectData.userName,
+    //     projectData.userEmail,
+    //   ),
+    // );
 
     devLog("Use Parcel to bundle it once in preparation for development");
     const entryFile = path.join(projectPath, "src/index.html");
-    const bundler = new Bundler(entryFile, { watch: false, minify: false });
+    const bundler = new Bundler(entryFile, {
+      watch: false,
+      minify: false,
+      outDir: path.resolve(projectPath, "dist"),
+      cacheDir: path.resolve(projectPath, ".cache"),
+    });
     await bundler.bundle();
 
     try {
@@ -311,14 +287,17 @@ function killAllServers() {
 ipcMain.on("dev-project", async function(e, [editorCmd, projectPath]) {
   if (editorCmd != null) {
     devLog("Open editor", editorCmd);
-    exec(editorCmd, ["."], { cwd: projectPath });
-    devLog("Install dependencies with pnpm.");
-    await pnpm(["install"]);
+    exec(editorCmd, ["."], { cwd: path.resolve(projectPath, "src") });
 
     if (parcelServers[projectPath] == null) {
       devLog("Start parcel");
       const entryFile = path.join(projectPath, "src/index.html");
-      const bundler = new Bundler(entryFile, { watch: true, minify: false });
+      const bundler = new Bundler(entryFile, {
+        watch: true,
+        minify: false,
+        outDir: path.resolve(projectPath, "dist"),
+        cacheDir: path.resolve(projectPath, ".cache"),
+      });
       const server = await bundler.serve();
       parcelServers[projectPath] = server;
       shell.openExternal(`http://localhost:${server.address().port}`);
@@ -340,10 +319,8 @@ ipcMain.on("stop-project-server", function(e, projectPath) {
   }
 });
 
-ipcMain.on("delete-confirmed", async function(e, [projectPath, rootPath]) {
-  await fs.remove(projectPath);
-
-  const projects = await getProjectsFromRoot(rootPath);
+ipcMain.on("delete-confirmed", async function(e, projectPath) {
+  await fs.remove(path.resolve(PROJECTS_ROOT, projectPath));
 
   e.reply("delete-project", projectPath);
 

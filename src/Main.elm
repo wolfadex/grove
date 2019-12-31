@@ -32,36 +32,15 @@ main =
 
 type Model
     = Loading
-    | NewSetup SetupModel
     | ProjectList SharedModel
     | Settings SharedModel
     | NewProject SharedModel NewProjectBuilder
 
 
-type alias SetupModel =
-    { name : String
-    , email : String
-    }
-
-
 type alias SharedModel =
     { projects : Dict Id Project
-    , rootPath : String
-    , name : String
-    , email : String
     , editor : Editor
     , activeProject : Id
-    }
-
-
-baseSharedModel : { a | name : String, email : String } -> SharedModel
-baseSharedModel { name, email } =
-    { projects = Dict.empty
-    , rootPath = ""
-    , name = name
-    , email = email
-    , editor = NoEditor
-    , activeProject = ""
     }
 
 
@@ -74,13 +53,10 @@ type alias NewProjectModel =
     { name : String }
 
 
-encodeNewProject : SharedModel -> NewProjectModel -> Value
-encodeNewProject model { name } =
+encodeNewProject : NewProjectModel -> Value
+encodeNewProject { name } =
     Json.Encode.object
         [ ( "name", Json.Encode.string name )
-        , ( "rootPath", Json.Encode.string model.rootPath )
-        , ( "userName", Json.Encode.string model.name )
-        , ( "userEmail", Json.Encode.string model.email )
         ]
 
 
@@ -245,10 +221,6 @@ editorUrl editor =
 
 type Msg
     = MainStarted Value
-    | SetName String
-    | SetEmail String
-    | GetRootDirectory
-    | SetRootPath String
     | LoadProject Value
     | LoadProjects Value
     | ShowSettings
@@ -285,7 +257,6 @@ subscriptions : Model -> Sub Msg
 subscriptions _ =
     Sub.batch
         [ mainStarted MainStarted
-        , setRootPath SetRootPath
         , loadProject LoadProject
         , loadProjects LoadProjects
         , projectCreated ProjectCreated
@@ -299,9 +270,6 @@ subscriptions _ =
 
 
 port mainStarted : (Value -> msg) -> Sub msg
-
-
-port setRootPath : (String -> msg) -> Sub msg
 
 
 port loadProject : (Value -> msg) -> Sub msg
@@ -320,19 +288,7 @@ port projectDeleted : (Id -> msg) -> Sub msg
 -- OUTGOING
 
 
-port getRootPath : () -> Cmd msg
-
-
-port saveRoot : String -> Cmd msg
-
-
 port createProject : Value -> Cmd msg
-
-
-port setName : String -> Cmd msg
-
-
-port setEmail : String -> Cmd msg
 
 
 port saveEditor : Value -> Cmd msg
@@ -341,7 +297,7 @@ port saveEditor : Value -> Cmd msg
 port developProject : ( Maybe String, Id ) -> Cmd msg
 
 
-port confirmDelete : ( Id, String, String ) -> Cmd msg
+port confirmDelete : ( Id, String ) -> Cmd msg
 
 
 port downloadEditor : String -> Cmd msg
@@ -363,43 +319,7 @@ update msg model =
                     ( ProjectList data, Cmd.none )
 
                 Err err ->
-                    Debug.log (Json.Decode.errorToString err) ( NewSetup { name = "", email = "" }, Cmd.none )
-
-        ( SetName name, NewSetup data ) ->
-            ( NewSetup { data | name = name }, Cmd.none )
-
-        ( SetEmail email, NewSetup data ) ->
-            ( NewSetup { data | email = email }, Cmd.none )
-
-        ( GetRootDirectory, NewSetup { name, email } ) ->
-            ( model, Cmd.batch [ getRootPath (), setName name, setEmail email ] )
-
-        ( GetRootDirectory, _ ) ->
-            ( model, getRootPath () )
-
-        ( SetRootPath newRootPath, NewSetup setupData ) ->
-            let
-                base =
-                    baseSharedModel setupData
-            in
-            ( ProjectList { base | rootPath = newRootPath }
-            , saveRoot newRootPath
-            )
-
-        ( SetRootPath newRootPath, ProjectList sharedData ) ->
-            ( ProjectList { sharedData | rootPath = newRootPath }
-            , saveRoot newRootPath
-            )
-
-        ( SetRootPath newRootPath, NewProject sharedData newProject ) ->
-            ( NewProject { sharedData | rootPath = newRootPath } newProject
-            , saveRoot newRootPath
-            )
-
-        ( SetRootPath newRootPath, Settings sharedData ) ->
-            ( Settings { sharedData | rootPath = newRootPath }
-            , saveRoot newRootPath
-            )
+                    Debug.todo ("hanle startup decode error: " ++ Json.Decode.errorToString err)
 
         ( LoadProjects maybeProjects, ProjectList sharedData ) ->
             case Json.Decode.decodeValue decodeProjects maybeProjects of
@@ -520,7 +440,7 @@ update msg model =
                 Ok project ->
                     ( NewProject sharedData (Creating data)
                     , project
-                        |> encodeNewProject sharedData
+                        |> encodeNewProject
                         |> createProject
                     )
 
@@ -558,8 +478,8 @@ update msg model =
         ( Develop id, ProjectList sharedData ) ->
             ( model, developProject ( editorStartupCommand sharedData.editor, id ) )
 
-        ( DeleteProject id name, ProjectList sharedData ) ->
-            ( model, confirmDelete ( id, name, sharedData.rootPath ) )
+        ( DeleteProject id name, ProjectList _ ) ->
+            ( model, confirmDelete ( id, name ) )
 
         ( SetActiveProject id, ProjectList sharedData ) ->
             ( ProjectList { sharedData | activeProject = id }, Cmd.none )
@@ -570,20 +490,13 @@ update msg model =
 
 decodeStartup : Decoder SharedModel
 decodeStartup =
-    Json.Decode.map6
-        (\projects rootPath name email maybeEditor activeProject ->
-            { projects = projects
-            , rootPath = rootPath
-            , name = name
-            , email = email
+    Json.Decode.map2
+        (\maybeEditor activeProject ->
+            { projects = Dict.empty
             , editor = Maybe.withDefault NoEditor maybeEditor
             , activeProject = activeProject
             }
         )
-        (Json.Decode.field "projects" decodeProjects)
-        (Json.Decode.field "rootPath" Json.Decode.string)
-        (Json.Decode.field "userName" Json.Decode.string)
-        (Json.Decode.field "userEmail" Json.Decode.string)
         (Json.Decode.maybe (Json.Decode.field "editor" decodeEditor))
         (Json.Decode.succeed "")
 
@@ -718,9 +631,6 @@ view model =
             Loading ->
                 viewLoading
 
-            NewSetup data ->
-                viewNewSetup data
-
             ProjectList data ->
                 viewProjectList data
 
@@ -739,53 +649,6 @@ viewLoading =
         , Element.centerY
         ]
         (Element.text "Loading...")
-
-
-viewNewSetup : SetupModel -> Element Msg
-viewNewSetup { name, email } =
-    Element.column
-        [ Element.centerX
-        , Element.centerY
-        , Element.spacing 8
-        , Element.width (Element.fill |> Element.maximum 500)
-        ]
-        [ Ui.customStyles
-        , Element.el
-            [ Element.centerX, Font.size 32, Element.padding 16 ]
-            (Element.text "Welcome to Grove!")
-        , Element.paragraph
-            [ Element.centerX, Ui.whiteSpacePre ]
-            [ Element.text "It looks like this is your first time using Grove. I'm going to need some information for creeating new projects. None of it is shared outside of this app." ]
-        , Ui.text
-            []
-            { onChange = SetName
-            , value = name
-            , label = Element.text "First I need your name"
-            }
-        , if String.isEmpty name then
-            Element.none
-
-          else
-            Ui.text
-                []
-                { onChange = SetEmail
-                , value = email
-                , label = Element.text "then your Email"
-                }
-        , if String.isEmpty name || String.isEmpty email then
-            Element.none
-
-          else
-            Element.column
-                [ Element.spacing 8 ]
-                [ Element.text "Finally, you need to"
-                , Ui.button
-                    [ Element.centerX ]
-                    { onPress = GetRootDirectory
-                    , label = Element.text "Set Your Root Directory"
-                    }
-                ]
-        ]
 
 
 viewProjectList : SharedModel -> Element Msg
@@ -919,16 +782,6 @@ viewProjectDetails editor id maybeProject =
                                   }
                                 ]
                             }
-
-                        -- , Element.column
-                        --     [ Element.spacing 8
-                        --     ]
-                        --     []
-                        -- (dependencies
-                        --     |> Dict.toList
-                        --     |> List.filter (Tuple.second >> .type_ >> (==) Direct)
-                        --     |> List.map viewDependency
-                        -- )
                         ]
 
                     -- Delete button is always last
@@ -944,15 +797,8 @@ viewProjectDetails editor id maybeProject =
         )
 
 
-viewDependency : ( Name, Dependency ) -> Element Msg
-viewDependency ( name, { version, license } ) =
-    Element.el
-        [ Element.paddingXY 8 0 ]
-        (Element.text (name ++ ", " ++ stringFromVersion version ++ ", " ++ license))
-
-
 viewSettings : SharedModel -> Element Msg
-viewSettings { rootPath, name, email, editor } =
+viewSettings { editor } =
     Element.column
         [ Background.color Color.primary
         , Element.spacing 16
@@ -961,19 +807,7 @@ viewSettings { rootPath, name, email, editor } =
         , Element.centerY
         , Border.rounded 3
         ]
-        [ Element.text ("Name: " ++ name)
-        , Element.text ("Email: " ++ email)
-        , Element.paragraph
-            [ Ui.whiteSpacePre ]
-            [ Element.text "Root Path: "
-            , Element.text rootPath
-            ]
-        , Ui.button
-            []
-            { onPress = GetRootDirectory
-            , label = Element.text "Change Root"
-            }
-        , Input.radio
+        [ Input.radio
             []
             { onChange = EditorSelected
             , selected =

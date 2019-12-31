@@ -1,8 +1,10 @@
 elm-stuff
 node_modules
 
-
 dist
 .cache
 
 yarn-error.log
+
+server/user_projects/*
+!server/user_projects/README.md
