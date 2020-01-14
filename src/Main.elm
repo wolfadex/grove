@@ -32,7 +32,7 @@ main =
 
 type Model
     = Loading
-    | ProjectList SharedModel
+    | ProjectList SharedModel String
     | Settings SharedModel
     | NewProject SharedModel NewProjectBuilder
 
@@ -197,6 +197,7 @@ type alias Project =
     { path : String
     , localName : String
     , name : String
+    , author : String
     , icon : Icon
     , dependencies : Dict Name Dependency
     , building : Bool
@@ -249,8 +250,9 @@ type Msg
     | SetNewProjectElmProgram ElmProgram
     | CreateNewProject
     | Develop Id
+    | SetProjectFilter String
     | DeleteProject Id String
-    | SetActiveProject Id
+    | ViewProjectDetails Id
     | Eject Id
     | BuildProject Id
     | FromMain Value
@@ -317,17 +319,20 @@ decodeMainMessage =
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case ( msg, model ) of
-        ( ShowSettings, ProjectList sharedData ) ->
+        ( ShowSettings, ProjectList sharedData _ ) ->
             ( Settings sharedData, Cmd.none )
 
         ( HideSettings, Settings sharedData ) ->
-            ( ProjectList sharedData, Cmd.none )
+            ( ProjectList sharedData "", Cmd.none )
 
-        ( ShowNewProjectForm, ProjectList sharedData ) ->
+        ( SetProjectFilter filter, ProjectList sharedData _ ) ->
+            ( ProjectList sharedData filter, Cmd.none )
+
+        ( ShowNewProjectForm, ProjectList sharedData _ ) ->
             ( NewProject sharedData baseNewProjectModel, Cmd.none )
 
         ( HideNewProjectForm, NewProject sharedData _ ) ->
-            ( ProjectList sharedData, Cmd.none )
+            ( ProjectList sharedData "", Cmd.none )
 
         ( SetNewProjectName name, NewProject sharedData newProject ) ->
             case newProject of
@@ -365,7 +370,7 @@ update msg model =
                 Err err ->
                     ( NewProject sharedData (Building data (Just err)), Cmd.none )
 
-        ( Develop id, ProjectList _ ) ->
+        ( Develop id, ProjectList _ _ ) ->
             ( model
             , toMain
                 "DEVELOP_PROJECT"
@@ -375,7 +380,7 @@ update msg model =
                 )
             )
 
-        ( DeleteProject id name, ProjectList _ ) ->
+        ( DeleteProject id name, ProjectList _ _ ) ->
             ( model
             , toMain
                 "CONFIRM_DELETE"
@@ -386,14 +391,14 @@ update msg model =
                 )
             )
 
-        ( SetActiveProject id, ProjectList sharedData ) ->
-            ( ProjectList { sharedData | activeProject = id }, Cmd.none )
+        ( ViewProjectDetails id, ProjectList sharedData filter ) ->
+            ( ProjectList { sharedData | activeProject = id } filter, Cmd.none )
 
         ( Eject id, _ ) ->
             ( model, toMain "EJECT_PROJECT" (Json.Encode.string id) )
 
-        ( BuildProject id, ProjectList sharedData ) ->
-            ( ProjectList { sharedData | projects = Dict.update id (Maybe.map (\p -> { p | building = True })) sharedData.projects }
+        ( BuildProject id, ProjectList sharedData filter ) ->
+            ( ProjectList { sharedData | projects = Dict.update id (Maybe.map (\p -> { p | building = True })) sharedData.projects } filter
             , toMain "BUILD_PROJECT" (Json.Encode.string id)
             )
 
@@ -419,20 +424,21 @@ update msg model =
                         ( "MAIN_STARTED", Loading ) ->
                             case Json.Decode.decodeValue decodeStartup payload of
                                 Ok data ->
-                                    ( ProjectList data, Cmd.none )
+                                    ( ProjectList data "", Cmd.none )
 
                                 Err _ ->
                                     ( ProjectList
                                         { projects = Dict.empty
                                         , activeProject = ""
                                         }
+                                        ""
                                     , Cmd.none
                                     )
 
-                        ( "LOAD_PROJECTS", ProjectList sharedData ) ->
+                        ( "LOAD_PROJECTS", ProjectList sharedData filter ) ->
                             case Json.Decode.decodeValue decodeProjects payload of
                                 Ok projects ->
-                                    ( ProjectList { sharedData | projects = projects }, Cmd.none )
+                                    ( ProjectList { sharedData | projects = projects } filter, Cmd.none )
 
                                 Err err ->
                                     -- Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
@@ -456,7 +462,7 @@ update msg model =
                                     -- Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
                                     ( model, Cmd.none )
 
-                        ( "LOAD_PROJECT", ProjectList sharedData ) ->
+                        ( "LOAD_PROJECT", ProjectList sharedData filter ) ->
                             case Json.Decode.decodeValue decodeProjects payload of
                                 Ok project ->
                                     ( ProjectList
@@ -470,6 +476,7 @@ update msg model =
                                                     Nothing ->
                                                         sharedData.activeProject
                                         }
+                                        filter
                                     , Cmd.none
                                     )
 
@@ -524,7 +531,7 @@ update msg model =
                             case Json.Decode.decodeValue Json.Decode.string payload of
                                 Ok name ->
                                     if name == data.name then
-                                        ( ProjectList sharedData, Cmd.none )
+                                        ( ProjectList sharedData "", Cmd.none )
 
                                     else
                                         ( model, Cmd.none )
@@ -532,10 +539,10 @@ update msg model =
                                 Err err ->
                                     Debug.log (Json.Decode.errorToString err) ( model, Cmd.none )
 
-                        ( "PROJECT_DELETED", ProjectList sharedData ) ->
+                        ( "PROJECT_DELETED", ProjectList sharedData filter ) ->
                             case Json.Decode.decodeValue Json.Decode.string payload of
                                 Ok id ->
-                                    ( ProjectList { sharedData | projects = Dict.remove id sharedData.projects }, Cmd.none )
+                                    ( ProjectList { sharedData | projects = Dict.remove id sharedData.projects } filter, Cmd.none )
 
                                 Err _ ->
                                     ( model, Cmd.none )
@@ -556,10 +563,10 @@ update msg model =
                                 Err _ ->
                                     ( model, Cmd.none )
 
-                        ( "PROJECT_BUILT", ProjectList sharedData ) ->
+                        ( "PROJECT_BUILT", ProjectList sharedData filter ) ->
                             case Json.Decode.decodeValue Json.Decode.string payload of
                                 Ok id ->
-                                    ( ProjectList { sharedData | projects = Dict.update id (Maybe.map (\p -> { p | building = False })) sharedData.projects }
+                                    ( ProjectList { sharedData | projects = Dict.update id (Maybe.map (\p -> { p | building = False })) sharedData.projects } filter
                                     , Cmd.none
                                     )
 
@@ -613,10 +620,11 @@ decodeProjects =
 
 decodeProject : Decoder Project
 decodeProject =
-    Json.Decode.map6 Project
+    Json.Decode.map7 Project
         (Json.Decode.field "projectPath" Json.Decode.string)
         (Json.Decode.field "directoryName" Json.Decode.string)
         (Json.Decode.field "projectName" Json.Decode.string)
+        (Json.Decode.field "author" Json.Decode.string)
         (Json.Decode.field "icon" decodeIcon)
         (Json.Decode.field "dependencies" decodeDependencies)
         (Json.Decode.succeed False)
@@ -728,8 +736,8 @@ view model =
             Loading ->
                 viewLoading
 
-            ProjectList data ->
-                viewProjectList data
+            ProjectList data filter ->
+                viewProjectList data filter
 
             Settings data ->
                 viewSettings data
@@ -748,39 +756,133 @@ viewLoading =
         (Element.text "Loading...")
 
 
-viewProjectList : SharedModel -> Element Msg
-viewProjectList { projects, activeProject } =
-    Element.row
-        [ Element.height Element.fill
-        , Element.width Element.fill
+viewProjectList : SharedModel -> String -> Element Msg
+viewProjectList { projects } filter =
+    Element.column
+        [ Element.width Element.fill
+        , Element.height Element.fill
+        , Element.clipY
         ]
-        [ Element.column
+        [ Element.el
             [ Background.color Color.primary
-            , Element.padding 8
-            , Element.spacing 16
-            , Element.height Element.fill
+            , Font.size 30
+            , Element.centerX
+            , Element.padding 16
+            , Element.width Element.fill
+            , Font.center
             ]
-            [ Ui.button
-                [ Element.centerX ]
-                { onPress = ShowNewProjectForm
-                , label = Element.text "+"
-                }
+            (Element.text "Elm Projects")
+        , Element.column
+            [ Element.padding 8
+            , Element.spacing 16
+            , Element.width Element.fill
+            , Element.height Element.fill
+            , Element.clipY
+            , Element.scrollbarY
+            ]
+            [ Element.row
+                [ Element.centerX
+                , Element.spacing 16
+                ]
+                [ Ui.button
+                    [ Element.centerX ]
+                    { onPress = ShowNewProjectForm
+                    , label = Element.text "Create Project"
+                    }
+                , Input.text
+                    []
+                    { onChange = SetProjectFilter
+                    , placeholder = Just (Input.placeholder [] (Element.text "Filter"))
+                    , label = Input.labelHidden "Project Filter"
+                    , text = filter
+                    }
+                ]
             , Keyed.column
                 [ Element.spacing 8
                 , Element.centerX
+                , Element.width Element.fill
+                , Element.scrollbarY
                 ]
                 (projects
                     |> Dict.toList
-                    |> List.map (viewProjectButton activeProject)
+                    |> List.filter (\( _, p ) -> p.name |> String.toLower |> String.contains (String.toLower filter))
+                    |> List.map viewProjectItem
                 )
-            , Ui.button
-                [ Element.alignBottom ]
-                { onPress = ShowSettings
-                , label = Element.text "Settings"
-                }
+
+            -- , Ui.button
+            --     [ Element.alignBottom ]
+            --     { onPress = ShowSettings
+            --     , label = Element.text "Settings"
+            --     }
             ]
-        , viewProjectDetails activeProject (Dict.get activeProject projects)
         ]
+
+
+viewProjectItem : ( Id, Project ) -> ( String, Element Msg )
+viewProjectItem ( id, { name, localName } ) =
+    ( id
+    , Element.row
+        [ Border.color Color.accentLight
+        , Border.width 2
+        , Border.solid
+        , Border.rounded 4
+        , Element.padding 8
+        , Element.spacing 8
+        , Element.width Element.fill
+        ]
+        [ Ui.buttonPlain
+            []
+            { onPress = ViewProjectDetails id
+            , label = Element.text name
+            }
+        , Ui.button
+            [ Element.alignRight ]
+            { onPress = Develop id
+            , label = Element.text "Open in Editor"
+            }
+        , Ui.button
+            [ Element.alignRight
+            , Background.color Color.danger
+            ]
+            { onPress = DeleteProject id localName
+            , label = Element.text "Delete"
+            }
+        ]
+    )
+
+
+
+-- Element.row
+--     [ Element.height Element.fill
+--     , Element.width Element.fill
+--     ]
+--     [ Element.column
+--         [ Background.color Color.primary
+--         , Element.padding 8
+--         , Element.spacing 16
+--         , Element.height Element.fill
+--         ]
+--         [ Ui.button
+--             [ Element.centerX ]
+--             { onPress = ShowNewProjectForm
+--             , label = Element.text "+"
+--             }
+--         , Keyed.column
+--             [ Element.spacing 8
+--             , Element.centerX
+--             ]
+--             (projects
+--                 |> Dict.toList
+--                 |> List.map (viewProjectButton activeProject)
+--             )
+--         , Ui.button
+--             [ Element.alignBottom ]
+--             { onPress = ShowSettings
+--             , label = Element.text "Settings"
+--             }
+--         ]
+--     , viewProjectDetails activeProject (Dict.get activeProject projects)
+--     ]
 
 
 viewProjectDetails : Id -> Maybe Project -> Element Msg
@@ -823,14 +925,14 @@ viewProjectDetails id maybeProject =
                             }
                         , Ui.button
                             [ Background.color Color.accentLight ]
-                            { onPress = SetActiveProject id
+                            { onPress = ViewProjectDetails id
                             , label = Element.text "Test"
                             }
                         , Ui.button
                             [ Background.color Color.accentLight ]
                             { onPress =
                                 if building then
-                                    SetActiveProject id
+                                    ViewProjectDetails id
 
                                 else
                                     BuildProject id
@@ -860,7 +962,7 @@ viewProjectDetails id maybeProject =
                             [ Element.text "Dependencies:"
                             , Ui.button
                                 [ Background.color Color.success ]
-                                { onPress = SetActiveProject id
+                                { onPress = ViewProjectDetails id
                                 , label = Element.text "Add"
                                 }
                             ]
@@ -939,7 +1041,7 @@ viewProjectButton activeProjectId ( id, { icon } ) =
           else
             Border.width 0
         ]
-        { onPress = Just (SetActiveProject id)
+        { onPress = Just (ViewProjectDetails id)
         , label =
             case icon of
                 RandomIcon { angle, color } ->

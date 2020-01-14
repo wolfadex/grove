@@ -158,14 +158,14 @@ async function loadProject(projectPath) {
     // );
     // const { name } = JSON.parse(packageJsonContents);
     const groverc = await fs.readFile(path.resolve(projectPath, ".groverc"));
-    const { icon, name } = JSON.parse(groverc);
+    const { icon, name, author } = JSON.parse(groverc);
     // const elmJsonContents = await fs.readFile(
     //   path.resolve(projectPath, elmJson.name),
     // );
     // const { dependencies } = JSON.parse(elmJsonContents);
     const dependencies = elmLicenseFinder(projectPath);
 
-    return { projectPath, projectName: name, icon, dependencies };
+    return { projectPath, projectName: name, icon, dependencies, author };
   } catch (error) {
     throw new Error(error);
   }

@@ -22,7 +22,7 @@ A tool for those who don't like to or don't want to use the command line for the
   - [ ] Remove dependency
   - [ ] Upgrade dependency
 https://github.com/wolfadex/grove#supported-editors
-## Supported Editors
+## Supported Editors:
 
 | Value           | Editor                                                                 | Linux | Windows |  OSX  |
 | --------------- | ---------------------------------------------------------------------- | :---: | :-----: | :---: |

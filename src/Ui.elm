@@ -1,4 +1,4 @@
-module Ui exposing (button, text, whiteSpacePre)
+module Ui exposing (button, buttonPlain, text, whiteSpacePre)
 
 import Element exposing (Attribute, Element)
 import Element.Background as Background
@@ -23,6 +23,19 @@ button attributes { onPress, label } =
          , Border.rounded 3
          , Element.paddingXY 16 8
          , button3D
+         ]
+            ++ attributes
+        )
+        { onPress = Just onPress
+        , label = label
+        }
+
+
+buttonPlain : List (Attribute msg) -> { onPress : msg, label : Element msg } -> Element msg
+buttonPlain attributes { onPress, label } =
+    Input.button
+        ([ Element.paddingXY 16 8
+         , Font.underline
          ]
             ++ attributes
         )
