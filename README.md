@@ -10,7 +10,7 @@ A tool for those who don't like to or don't want to use the command line for the
 
 ## Features:
 - [x] Create project
-- [x] Edit project in your default editor (see [table](/#Supported_Editors) for list of supported editors)
+- [x] Edit project in your default editor (see [table](https://github.com/wolfadex/grove#supported-editors) for list of supported editors)
 - [x] Start a dev server when editing
 - [x] Delete projects
 - [x] Eject projects
@@ -21,7 +21,7 @@ A tool for those who don't like to or don't want to use the command line for the
   - [ ] Add dependency
   - [ ] Remove dependency
   - [ ] Upgrade dependency
-
+https://github.com/wolfadex/grove#supported-editors
 ## Supported Editors
 
 | Value           | Editor                                                                 | Linux | Windows |  OSX  |
