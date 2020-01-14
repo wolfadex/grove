@@ -240,9 +240,10 @@ ipcMain.on("client-to-main", async function(_, { action, payload }) {
   switch (action) {
     case "CREATE_PROJECT":
       {
+        const { name, author, elmProgram } = payload;
+
         try {
-          console.log("Carl", 1);
-          const projectPath = path.resolve(PROJECTS_ROOT, payload.name);
+          const projectPath = path.resolve(PROJECTS_ROOT, name);
 
           await fs.mkdir(projectPath);
           // Copy over template files
@@ -250,7 +251,6 @@ ipcMain.on("client-to-main", async function(_, { action, payload }) {
             path.resolve(__dirname, "template/common"),
             projectPath,
           );
-          console.log("Carl", 2);
           // Rename .gitignore
           await fs.move(
             path.resolve(projectPath, "gitignore"),
@@ -259,35 +259,47 @@ ipcMain.on("client-to-main", async function(_, { action, payload }) {
           // Create .groverc
           await fs.writeFile(
             path.resolve(projectPath, ".groverc"),
-            templates.groverc(payload.name),
+            templates.groverc(name, author),
           );
-          console.log("Carl", 3);
           // Create index.html
           await fs.writeFile(
             path.resolve(projectPath, "src/index.html"),
-            templates.html(payload.name),
+            templates.html(name),
           );
           // Create Elm file
+          let elmTemplate;
+          switch (elmProgram) {
+            case "application":
+              elmTemplate = templates.elmApplication;
+              break;
+            case "document":
+              elmTemplate = templates.elmDocument;
+              break;
+            case "element":
+              elmTemplate = templates.elmElement;
+              break;
+            default:
+              elmTemplate = templates.elmSandbox;
+              break;
+          }
           await fs.writeFile(
             path.resolve(projectPath, "src/Main.elm"),
-            templates.elmSandbox(payload.name),
+            elmTemplate(name),
           );
-          console.log("Carl", 4);
+
           try {
             const project = await loadProject(projectPath);
             sendToClient("LOAD_PROJECT", {
-              [projectPath]: { ...project, directoryName: payload.name },
+              [projectPath]: { ...project, directoryName: name },
             });
-            console.log("Carl", 5);
           } catch (error) {
             devLog("Re-get projects error", error);
           }
-          console.log("Carl", 6);
-          sendToClient("PROJECT_CREATED", payload.name);
+
+          sendToClient("PROJECT_CREATED", name);
         } catch (error) {
           devLog("Create project error", error);
-          sendToClient("ERROR_CREATING_PROJECT", { name: payload.name, error });
-          console.log("Carl", 7);
+          sendToClient("ERROR_CREATING_PROJECT", { name: name, error });
         }
       }
       break;

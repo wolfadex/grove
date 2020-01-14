@@ -3,6 +3,9 @@ module.exports = {
   packageJson,
   elmSandbox,
   elmElement,
+  elmDocument,
+  elmApplication,
+  elmDocs,
   readme,
   groverc,
 };
@@ -30,9 +33,10 @@ function html(name) {
 `;
 }
 
-function packageJson(projectName, userName, email) {
+function packageJson(projectName, userName, email, description) {
   return `{
   "name": "${projectName}",
+  "description": "${description}",
   "version": "1.0.0",
   "author": {
     "name": "${userName}",
@@ -57,10 +61,12 @@ function packageJson(projectName, userName, email) {
 function readme(name) {
   return `# ${name}
 
+${description}
+
 This project was created with [Grove](https://github.com/wolfadex/grove).`;
 }
 
-function groverc(name) {
+function groverc(name, author) {
   return `{
   "icon": {
     "style": "random",
@@ -68,9 +74,21 @@ function groverc(name) {
     "color": ${JSON.stringify(randomColor())}
   },
   "name": "${name}",
+  "author": "${author}",
   "tests": {
     "status": null
   }
+}`;
+}
+
+function elmDocs(name, author, description) {
+  return `{
+  "name": "${author}/${name}",
+  "summary": "${description}",
+  "version": "1.0.0",
+  "exposed-modules": [
+    "Main"
+  ]
 }`;
 }
 
@@ -88,7 +106,7 @@ function elmSandbox(name) {
   return `module Main exposing (Model, Msg, init, main, update, view)
 
 import Browser
-import Html exposing (..)
+import Html exposing (Html)
 
 
 main : Program () Model Msg
@@ -100,8 +118,18 @@ main =
         }
 
 
+---- TYPES ----
+
+
 type alias Model =
     {}
+
+
+type Msg
+    = NoOp
+
+
+---- INIT ----
 
 
 init : Model
@@ -109,8 +137,7 @@ init =
     {}
 
 
-type Msg
-    = NoOp
+---- UDPATE ----
 
 
 update : Msg -> Model -> Model
@@ -120,10 +147,13 @@ update msg model =
             model
 
 
+---- VIEW ----
+
+
 view : Model -> Html Msg
 view model =
-    div []
-        [ text "Hello, ${name}!" ]
+    Html.div []
+        [ Html.text "Hello, ${name}!" ]
 `;
 }
 
@@ -131,7 +161,7 @@ function elmElement(name) {
   return `module Main exposing (Model, Msg, init, main, subscriptions, update, view)
 
 import Browser
-import Html exposing (..)
+import Html exposing (Html)
 
 
 main : Program () Model Msg
@@ -144,8 +174,18 @@ main =
         }
 
 
+---- TYPES ----
+
+
 type alias Model =
     {}
+
+
+type Msg
+    = NoOp
+
+
+---- INIT ----
 
 
 init : () -> ( Model, Cmd Msg )
@@ -153,13 +193,19 @@ init _ =
     ( {}, Cmd.none )
 
 
+---- SUBSCRIPTIONS ----
+
+
 subscriptions : Model -> Sub Msg
 subscriptions _ =
     Sub.none
 
 
-type Msg
-    = NoOp
+---- PORTS ----
+-- INCOMING
+-- OUTGOING
+
+---- UPDATE ----
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -169,9 +215,175 @@ update msg model =
             ( model, Cmd.none )
 
 
+---- VIEW ----
+
+
 view : Model -> Html Msg
 view model =
-    div []
-        [ text "Hello, ${name}!" ]
+    Html.div []
+        [ Html.text "Hello, ${name}!" ]
+`;
+}
+
+function elmDocument(name) {
+  return `module Main exposing (Model, Msg, init, main, subscriptions, update, view)
+
+import Browser exposing (Document)
+import Html exposing (Html)
+
+
+main : Program () Model Msg
+main =
+    Browser.document
+        { init = init
+        , subscriptions = subscriptions
+        , update = update
+        , view = view
+        }
+
+
+---- TYPES ----
+
+
+type alias Model =
+    {}
+
+
+type Msg
+    = NoOp
+
+
+---- INIT ----
+
+
+init : () -> ( Model, Cmd Msg )
+init _ =
+    ( {}, Cmd.none )
+
+
+---- SUBSCRIPTIONS ----
+
+
+subscriptions : Model -> Sub Msg
+subscriptions _ =
+    Sub.none
+
+
+---- PORTS ----
+-- INCOMING
+-- OUTGOING
+
+---- UPDATE ----
+
+
+update : Msg -> Model -> ( Model, Cmd Msg )
+update msg model =
+    case msg of
+        NoOp ->
+            ( model, Cmd.none )
+
+
+---- VIEW ----
+
+
+view : Model -> Document Msg
+view model =
+    { title = "${name}"
+    , body =
+        [ Html.text "Hello, ${name}!" ]
+    }
+`;
+}
+
+function elmApplication(name) {
+  return `module Main exposing (Model, Msg, init, main, subscriptions, update, view)
+
+import Browser exposing (Document)
+import Browser.Navigation as Nav
+import Html exposing (Html)
+import Url
+
+
+main : Program () Model Msg
+main =
+    Browser.application
+        { init = init
+        , view = view
+        , update = update
+        , subscriptions = subscriptions
+        , onUrlChange = UrlChanged
+        , onUrlRequest = LinkClicked
+        }
+
+
+---- TYPES ----
+
+
+type alias Model =
+    { key : Nav.Key }
+
+
+type Msg
+    = NoOp
+    | LinkClicked Browser.UrlRequest
+    | UrlChanged Url.Url
+
+
+---- INIT ----
+
+
+init : () -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
+init _ url key =
+    ( { key = key }
+    , Cmd.none
+    )
+
+
+---- SUBSCRIPTIONS ----
+
+
+subscriptions : Model -> Sub Msg
+subscriptions _ =
+    Sub.none
+
+
+---- PORTS ----
+-- INCOMING
+-- OUTGOING
+
+---- UPDATE ----
+
+
+update : Msg -> Model -> ( Model, Cmd Msg )
+update msg model =
+    case msg of
+        NoOp ->
+            ( model, Cmd.none )
+
+        LinkClicked urlRequest ->
+            case urlRequest of
+              Browser.Internal url ->
+                ( model
+                , Nav.pushUrl model.key (Url.toString url)
+                )
+      
+              Browser.External href ->
+                ( model
+                , Nav.load href
+                )
+
+        UrlChanged url ->
+            ( model, Cmd.none )
+
+
+---- VIEW ----
+
+
+view : Model -> Document Msg
+view model =
+    { title = "${name}"
+    , body =
+        [ Html.text "Hello, ${name}!" ]
+    }
 `;
 }

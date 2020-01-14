@@ -39,7 +39,6 @@ type Model
 
 type alias SharedModel =
     { projects : Dict Id Project
-    , editor : Editor
     , activeProject : Id
     }
 
@@ -49,30 +48,144 @@ type NewProjectBuilder
     | Creating NewProjectModel
 
 
+type ElmProgram
+    = ElmProgramSandbox
+    | ElmProgramElement
+    | ElmProgramDocument
+    | ElmProgramApplication
+
+
+encodeElmProgram : ElmProgram -> Value
+encodeElmProgram elmProgram =
+    Json.Encode.string <|
+        case elmProgram of
+            ElmProgramSandbox ->
+                "sandbox"
+
+            ElmProgramElement ->
+                "element"
+
+            ElmProgramDocument ->
+                "document"
+
+            ElmProgramApplication ->
+                "application"
+
+
+elmProgramToString : ElmProgram -> String
+elmProgramToString elmProgram =
+    case elmProgram of
+        ElmProgramSandbox ->
+            "Sandbox"
+
+        ElmProgramElement ->
+            "Element"
+
+        ElmProgramDocument ->
+            "Document"
+
+        ElmProgramApplication ->
+            "Application"
+
+
 type alias NewProjectModel =
-    { name : String }
+    { name : String
+    , author : String
+    , elmProgram : ElmProgram
+    }
 
 
 encodeNewProject : NewProjectModel -> Value
-encodeNewProject { name } =
+encodeNewProject { name, author, elmProgram } =
     Json.Encode.object
         [ ( "name", Json.Encode.string name )
+        , ( "author", Json.Encode.string author )
+        , ( "elmProgram", encodeElmProgram elmProgram )
         ]
 
 
 parseNewProject : NewProjectModel -> Result String NewProjectModel
-parseNewProject ({ name } as project) =
-    if String.isEmpty name then
-        Err "A project requires a name"
+parseNewProject ({ name, author } as project) =
+    case parseNewProjectName name of
+        Just err ->
+            Err err
 
-    else
-        Ok project
+        Nothing ->
+            case parseNewProjectAuthor author of
+                Just err ->
+                    Err err
+
+                Nothing ->
+                    Ok project
+
+
+parseNewProjectName : String -> Maybe String
+parseNewProjectName name =
+    case String.toList name of
+        [] ->
+            Just "A project requires a name"
+
+        '.' :: _ ->
+            Just "Name cannot start with a '.'"
+
+        '_' :: _ ->
+            Just "Name cannot start with a '_'"
+
+        _ ->
+            if String.length name > 214 then
+                Just "Name is too long. Max length is 214 characters"
+
+            else if String.any Char.isUpper name then
+                Just "Upper case letters are not allowed"
+
+            else if String.any (not << isUrlSafeCharacter) name then
+                Just "The only allowed characters are a-z, 0-9, -, ., _, and ~"
+
+            else
+                Nothing
+
+
+parseNewProjectAuthor : String -> Maybe String
+parseNewProjectAuthor author =
+    case String.toList author of
+        [] ->
+            Just "A project requires a author"
+
+        '.' :: _ ->
+            Just "Name cannot start with a '.'"
+
+        '_' :: _ ->
+            Just "Name cannot start with a '_'"
+
+        first :: _ ->
+            if Char.isDigit first then
+                Just "Author can't start with a number"
+
+            else if String.length author > 214 then
+                Just "Author is too long. Max length is 214 characters"
+
+            else if String.any Char.isUpper author then
+                Just "Upper case letters are not allowed"
+
+            else if String.any (not << isUrlSafeCharacter) author then
+                Just "The only allowed characters are: a-z, 0-9, -, ., _, and ~"
+
+            else
+                Nothing
+
+
+isUrlSafeCharacter : Char -> Bool
+isUrlSafeCharacter c =
+    Char.isAlphaNum c || c == '-' || c == '_' || c == '.' || c == '~'
 
 
 baseNewProjectModel : NewProjectBuilder
 baseNewProjectModel =
     Building
-        { name = "" }
+        { name = ""
+        , author = ""
+        , elmProgram = ElmProgramSandbox
+        }
         Nothing
 
 
@@ -126,105 +239,14 @@ type Icon
     = RandomIcon { angle : Int, color : Color }
 
 
-type Editor
-    = NoEditor
-    | VSCode
-    | Atom
-    | SublimeText
-
-
-decodeEditor : Decoder Editor
-decodeEditor =
-    Json.Decode.string
-        |> Json.Decode.andThen
-            (\str ->
-                Json.Decode.succeed <|
-                    case str of
-                        "vscode" ->
-                            VSCode
-
-                        "atom" ->
-                            Atom
-
-                        "sublimetext" ->
-                            SublimeText
-
-                        _ ->
-                            NoEditor
-            )
-
-
-encodeEditor : Editor -> Value
-encodeEditor editor =
-    Json.Encode.string <|
-        case editor of
-            NoEditor ->
-                "none"
-
-            VSCode ->
-                "vscode"
-
-            Atom ->
-                "atom"
-
-            SublimeText ->
-                "sublimetext"
-
-
-editorStartupCommand : Editor -> Value
-editorStartupCommand editor =
-    case editor of
-        NoEditor ->
-            Json.Encode.null
-
-        VSCode ->
-            Json.Encode.string "code"
-
-        Atom ->
-            Json.Encode.string "atom"
-
-        SublimeText ->
-            Json.Encode.string "subl"
-
-
-editorName : Editor -> String
-editorName editor =
-    case editor of
-        NoEditor ->
-            "No Editor"
-
-        VSCode ->
-            "Visual Studio Code"
-
-        Atom ->
-            "Atom"
-
-        SublimeText ->
-            "Sublime Text"
-
-
-editorUrl : Editor -> String
-editorUrl editor =
-    case editor of
-        NoEditor ->
-            ""
-
-        VSCode ->
-            "https://code.visualstudio.com/"
-
-        Atom ->
-            "https://atom.io/"
-
-        SublimeText ->
-            "https://www.sublimetext.com/"
-
-
 type Msg
     = ShowSettings
     | HideSettings
     | ShowNewProjectForm
     | HideNewProjectForm
     | SetNewProjectName String
+    | SetNewProjectAuthor String
+    | SetNewProjectElmProgram ElmProgram
     | CreateNewProject
     | Develop Id
     | DeleteProject Id String
@@ -315,6 +337,22 @@ update msg model =
                 Creating _ ->
                     ( model, Cmd.none )
 
+        ( SetNewProjectAuthor author, NewProject sharedData newProject ) ->
+            case newProject of
+                Building data error ->
+                    ( NewProject sharedData (Building { data | author = author } error), Cmd.none )
+
+                Creating _ ->
+                    ( model, Cmd.none )
+
+        ( SetNewProjectElmProgram elmProgram, NewProject sharedData newProject ) ->
+            case newProject of
+                Building data error ->
+                    ( NewProject sharedData (Building { data | elmProgram = elmProgram } error), Cmd.none )
+
+                Creating _ ->
+                    ( model, Cmd.none )
+
         ( CreateNewProject, NewProject sharedData (Building data _) ) ->
             case parseNewProject data of
                 Ok project ->
@@ -327,13 +365,12 @@ update msg model =
                 Err err ->
                     ( NewProject sharedData (Building data (Just err)), Cmd.none )
 
-        ( Develop id, ProjectList sharedData ) ->
+        ( Develop id, ProjectList _ ) ->
             ( model
             , toMain
                 "DEVELOP_PROJECT"
                 (Json.Encode.object
-                    [ ( "editor", editorStartupCommand sharedData.editor )
-                    , ( "projectPath", Json.Encode.string id )
+                    [ ( "projectPath", Json.Encode.string id )
                     ]
                 )
             )
@@ -387,7 +424,6 @@ update msg model =
                                 Err _ ->
                                     ( ProjectList
                                         { projects = Dict.empty
-                                        , editor = NoEditor
                                         , activeProject = ""
                                         }
                                     , Cmd.none
@@ -561,14 +597,12 @@ update msg model =
 
 decodeStartup : Decoder SharedModel
 decodeStartup =
-    Json.Decode.map2
-        (\maybeEditor activeProject ->
+    Json.Decode.map
+        (\activeProject ->
             { projects = Dict.empty
-            , editor = Maybe.withDefault NoEditor maybeEditor
             , activeProject = activeProject
             }
         )
-        (Json.Decode.maybe (Json.Decode.field "editor" decodeEditor))
         (Json.Decode.succeed "")
 
 
@@ -715,7 +749,7 @@ viewLoading =
 
 
 viewProjectList : SharedModel -> Element Msg
-viewProjectList { projects, editor, activeProject } =
+viewProjectList { projects, activeProject } =
     Element.row
         [ Element.height Element.fill
         , Element.width Element.fill
@@ -745,12 +779,12 @@ viewProjectList { projects, editor, activeProject } =
                 , label = Element.text "Settings"
                 }
             ]
-        , viewProjectDetails editor activeProject (Dict.get activeProject projects)
+        , viewProjectDetails activeProject (Dict.get activeProject projects)
         ]
 
 
-viewProjectDetails : Editor -> Id -> Maybe Project -> Element Msg
-viewProjectDetails editor id maybeProject =
+viewProjectDetails : Id -> Maybe Project -> Element Msg
+viewProjectDetails id maybeProject =
     Element.el
         [ Element.height Element.fill
         , Element.width Element.fill
@@ -784,17 +818,9 @@ viewProjectDetails editor id maybeProject =
                         ]
                         [ Ui.button
                             [ Background.color Color.accentLight ]
-                            (case editor of
-                                NoEditor ->
-                                    { onPress = ShowSettings
-                                    , label = Element.text "Set Editor"
-                                    }
-
-                                _ ->
-                                    { onPress = Develop id
-                                    , label = Element.text "Develop"
-                                    }
-                            )
+                            { onPress = Develop id
+                            , label = Element.text "Develop"
+                            }
                         , Ui.button
                             [ Background.color Color.accentLight ]
                             { onPress = SetActiveProject id
@@ -897,11 +923,6 @@ viewSettings _ =
         ]
 
 
-editorOptions : List Editor
-editorOptions =
-    [ VSCode, Atom, SublimeText ]
-
-
 viewProjectButton : Id -> ( Id, Project ) -> ( String, Element Msg )
 viewProjectButton activeProjectId ( id, { icon } ) =
     ( id
@@ -998,16 +1019,31 @@ viewNewProject projectBuilder =
             (Element.text "New Project")
         , Ui.text
             []
+            { onChange = SetNewProjectAuthor
+            , label = Element.text "Author"
+            , value = projectData.author
+            }
+        , Ui.text
+            []
             { onChange = SetNewProjectName
             , label = Element.text "Name"
             , value = projectData.name
+            }
+        , Input.radio
+            []
+            { onChange = SetNewProjectElmProgram
+            , options = List.map viewElmProgramOption elmProgramOptionsList
+            , selected = Just projectData.elmProgram
+            , label = Input.labelAbove [] (Element.text "Type of Program:")
             }
         , case error of
             Nothing ->
                 Element.none
 
             Just err ->
-                Element.text err
+                Element.paragraph
+                    [ Font.color Color.danger ]
+                    [ Element.text err ]
         , Element.row
             [ Element.alignRight
             , Element.spacing 16
@@ -1030,3 +1066,18 @@ viewNewProject projectBuilder =
                 }
             ]
         ]
+
+
+viewElmProgramOption : ElmProgram -> Input.Option ElmProgram Msg
+viewElmProgramOption elmProgram =
+    Input.option elmProgram
+        (Element.text <| elmProgramToString elmProgram)
+
+
+elmProgramOptionsList : List ElmProgram
+elmProgramOptionsList =
+    [ ElmProgramSandbox
+    , ElmProgramElement
+    , ElmProgramDocument
+    , ElmProgramApplication
+    ]
