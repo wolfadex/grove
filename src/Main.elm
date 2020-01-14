@@ -171,20 +171,20 @@ encodeEditor editor =
                 "sublimetext"
 
 
-editorStartupCommand : Editor -> Maybe String
+editorStartupCommand : Editor -> Value
 editorStartupCommand editor =
     case editor of
         NoEditor ->
-            Nothing
+            Json.Encode.null
 
         VSCode ->
-            Just "code"
+            Json.Encode.string "code"
 
         Atom ->
-            Just "atom"
+            Json.Encode.string "atom"
 
         SublimeText ->
-            Just "subl"
+            Json.Encode.string "subl"
 
 
 editorName : Editor -> String
@@ -220,25 +220,18 @@ editorUrl editor =
 
 
 type Msg
-    = MainStarted Value
-    | LoadProject Value
-    | LoadProjects Value
-    | ShowSettings
+    = ShowSettings
     | HideSettings
     | ShowNewProjectForm
     | HideNewProjectForm
     | SetNewProjectName String
     | CreateNewProject
-    | ProjectCreated String
-    | EditorSelected Editor
     | Develop Id
     | DeleteProject Id String
-    | DownloadEditor String
     | SetActiveProject Id
-    | ProjectDeleted Id
     | Eject Id
     | BuildProject Id
-    | ProjectBuilt Id
+    | FromMain Value
 
 
 
@@ -258,14 +251,7 @@ init _ =
 
 subscriptions : Model -> Sub Msg
 subscriptions _ =
-    Sub.batch
-        [ mainStarted MainStarted
-        , loadProject LoadProject
-        , loadProjects LoadProjects
-        , projectCreated ProjectCreated
-        , projectDeleted ProjectDeleted
-        , projectBuilt ProjectBuilt
-        ]
+    mainToClient FromMain
 
 
 
@@ -273,47 +259,33 @@ subscriptions _ =
 -- INCOMING
 
 
-port mainStarted : (Value -> msg) -> Sub msg
-
-
-port loadProject : (Value -> msg) -> Sub msg
-
-
-port loadProjects : (Value -> msg) -> Sub msg
-
-
-port projectCreated : (String -> msg) -> Sub msg
-
-
-port projectDeleted : (Id -> msg) -> Sub msg
-
-
-port projectBuilt : (Id -> msg) -> Sub msg
+port mainToClient : (Value -> msg) -> Sub msg
 
 
 
 -- OUTGOING
 
 
-port createProject : Value -> Cmd msg
+port clientToMain : Value -> Cmd msg
 
 
-port saveEditor : Value -> Cmd msg
+toMain : String -> Value -> Cmd msg
+toMain action payload =
+    Json.Encode.object
+        [ ( "action", Json.Encode.string action )
+        , ( "payload", payload )
+        ]
+        |> clientToMain
 
 
-port developProject : ( Maybe String, Id ) -> Cmd msg
-
-
-port confirmDelete : ( Id, String ) -> Cmd msg
-
-
-port downloadEditor : String -> Cmd msg
-
-
-port ejectProject : Id -> Cmd msg
-
-
-port buildProject : Id -> Cmd msg
+decodeMainMessage : Decoder { action : String, payload : Value }
+decodeMainMessage =
+    Json.Decode.map2
+        (\action payload ->
+            { action = action, payload = payload }
+        )
+        (Json.Decode.field "action" Json.Decode.string)
+        (Json.Decode.field "payload" Json.Decode.value)
 
 
 
@@ -323,123 +295,6 @@ port buildProject : Id -> Cmd msg
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case ( msg, model ) of
-        ( DownloadEditor url, _ ) ->
-            ( model, downloadEditor url )
-
-        ( MainStarted startupConfig, Loading ) ->
-            case Json.Decode.decodeValue decodeStartup startupConfig of
-                Ok data ->
-                    ( ProjectList data, Cmd.none )
-
-                Err _ ->
-                    ( ProjectList
-                        { projects = Dict.empty
-                        , editor = NoEditor
-                        , activeProject = ""
-                        }
-                    , Cmd.none
-                    )
-
-        ( LoadProjects maybeProjects, ProjectList sharedData ) ->
-            case Json.Decode.decodeValue decodeProjects maybeProjects of
-                Ok projects ->
-                    ( ProjectList { sharedData | projects = projects }, Cmd.none )
-
-                Err err ->
-                    -- Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
-                    ( model, Cmd.none )
-
-        ( LoadProjects maybeProjects, Settings sharedData ) ->
-            case Json.Decode.decodeValue decodeProjects maybeProjects of
-                Ok projects ->
-                    ( Settings { sharedData | projects = projects }, Cmd.none )
-
-                Err err ->
-                    -- Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
-                    ( model, Cmd.none )
-
-        ( LoadProjects maybeProjects, NewProject sharedData newProject ) ->
-            case Json.Decode.decodeValue decodeProjects maybeProjects of
-                Ok projects ->
-                    ( NewProject { sharedData | projects = projects } newProject, Cmd.none )
-
-                Err err ->
-                    -- Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
-                    ( model, Cmd.none )
-
-        ( LoadProject maybeProject, ProjectList sharedData ) ->
-            case Json.Decode.decodeValue decodeProjects maybeProject of
-                Ok project ->
-                    ( ProjectList
-                        { sharedData
-                            | projects = Dict.union project sharedData.projects
-                            , activeProject =
-                                case project |> Dict.toList |> List.head |> Maybe.map Tuple.first of
-                                    Just id ->
-                                        id
-
-                                    Nothing ->
-                                        sharedData.activeProject
-                        }
-                    , Cmd.none
-                    )
-
-                Err err ->
-                    -- Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
-                    ( model, Cmd.none )
-
-        ( LoadProject maybeProject, Settings sharedData ) ->
-            case Json.Decode.decodeValue decodeProjects maybeProject of
-                Ok project ->
-                    ( Settings
-                        { sharedData
-                            | projects = Dict.union project sharedData.projects
-                            , activeProject =
-                                case project |> Dict.toList |> List.head |> Maybe.map Tuple.first of
-                                    Just id ->
-                                        id
-
-                                    Nothing ->
-                                        sharedData.activeProject
-                        }
-                    , Cmd.none
-                    )
-
-                Err err ->
-                    -- Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
-                    ( model, Cmd.none )
-
-        ( LoadProject maybeProject, NewProject sharedData newProject ) ->
-            case Json.Decode.decodeValue decodeProjects maybeProject of
-                Ok project ->
-                    ( NewProject
-                        { sharedData
-                            | projects = Dict.union project sharedData.projects
-                            , activeProject =
-                                case project |> Dict.toList |> List.head |> Maybe.map Tuple.first of
-                                    Just id ->
-                                        id
-
-                                    Nothing ->
-                                        sharedData.activeProject
-                        }
-                        newProject
-                    , Cmd.none
-                    )
-
-                Err err ->
-                    -- Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
-                    ( model, Cmd.none )
-
-        ( ProjectDeleted id, ProjectList sharedData ) ->
-            ( ProjectList { sharedData | projects = Dict.remove id sharedData.projects }, Cmd.none )
-
-        ( ProjectDeleted id, Settings sharedData ) ->
-            ( Settings { sharedData | projects = Dict.remove id sharedData.projects }, Cmd.none )
-
-        ( ProjectDeleted id, NewProject sharedData newProject ) ->
-            ( NewProject { sharedData | projects = Dict.remove id sharedData.projects } newProject, Cmd.none )
-
         ( ShowSettings, ProjectList sharedData ) ->
             ( Settings sharedData, Cmd.none )
 
@@ -466,85 +321,239 @@ update msg model =
                     ( NewProject sharedData (Creating data)
                     , project
                         |> encodeNewProject
-                        |> createProject
+                        |> toMain "CREATE_PROJECT"
                     )
 
                 Err err ->
                     ( NewProject sharedData (Building data (Just err)), Cmd.none )
 
-        ( ProjectCreated name, NewProject sharedData (Creating data) ) ->
-            if name == data.name then
-                ( ProjectList sharedData, Cmd.none )
-
-            else
-                ( model, Cmd.none )
-
-        ( EditorSelected editor, Settings sharedData ) ->
-            ( Settings { sharedData | editor = editor }
-            , editor
-                |> encodeEditor
-                |> saveEditor
-            )
-
-        ( EditorSelected editor, ProjectList sharedData ) ->
-            ( ProjectList { sharedData | editor = editor }
-            , editor
-                |> encodeEditor
-                |> saveEditor
-            )
-
-        ( EditorSelected editor, NewProject sharedData newProject ) ->
-            ( NewProject { sharedData | editor = editor } newProject
-            , editor
-                |> encodeEditor
-                |> saveEditor
-            )
-
         ( Develop id, ProjectList sharedData ) ->
-            ( model, developProject ( editorStartupCommand sharedData.editor, id ) )
+            ( model
+            , toMain
+                "DEVELOP_PROJECT"
+                (Json.Encode.object
+                    [ ( "editor", editorStartupCommand sharedData.editor )
+                    , ( "projectPath", Json.Encode.string id )
+                    ]
+                )
+            )
 
         ( DeleteProject id name, ProjectList _ ) ->
-            ( model, confirmDelete ( id, name ) )
+            ( model
+            , toMain
+                "CONFIRM_DELETE"
+                (Json.Encode.object
+                    [ ( "projectPath", Json.Encode.string id )
+                    , ( "name", Json.Encode.string name )
+                    ]
+                )
+            )
 
         ( SetActiveProject id, ProjectList sharedData ) ->
             ( ProjectList { sharedData | activeProject = id }, Cmd.none )
 
         ( Eject id, _ ) ->
-            ( model, ejectProject id )
+            ( model, toMain "EJECT_PROJECT" (Json.Encode.string id) )
 
         ( BuildProject id, ProjectList sharedData ) ->
             ( ProjectList { sharedData | projects = Dict.update id (Maybe.map (\p -> { p | building = True })) sharedData.projects }
-            , buildProject id
+            , toMain "BUILD_PROJECT" (Json.Encode.string id)
             )
 
         ( BuildProject id, NewProject sharedData newProject ) ->
             ( NewProject
                 { sharedData | projects = Dict.update id (Maybe.map (\p -> { p | building = True })) sharedData.projects }
                 newProject
-            , buildProject id
+            , toMain "BUILD_PROJECT" (Json.Encode.string id)
             )
 
         ( BuildProject id, Settings sharedData ) ->
             ( Settings { sharedData | projects = Dict.update id (Maybe.map (\p -> { p | building = True })) sharedData.projects }
-            , buildProject id
+            , toMain "BUILD_PROJECT" (Json.Encode.string id)
             )
 
-        ( ProjectBuilt id, ProjectList sharedData ) ->
-            ( ProjectList { sharedData | projects = Dict.update id (Maybe.map (\p -> { p | building = False })) sharedData.projects }
-            , Cmd.none
-            )
+        ( FromMain value, _ ) ->
+            case Json.Decode.decodeValue decodeMainMessage value of
+                Err err ->
+                    ( model, Cmd.none )
 
-        ( ProjectBuilt id, NewProject sharedData newProject ) ->
-            ( NewProject
-                { sharedData | projects = Dict.update id (Maybe.map (\p -> { p | building = False })) sharedData.projects }
-                newProject
-            , Cmd.none
-            )
+                Ok { action, payload } ->
+                    case ( action, model ) of
+                        ( "MAIN_STARTED", Loading ) ->
+                            case Json.Decode.decodeValue decodeStartup payload of
+                                Ok data ->
+                                    ( ProjectList data, Cmd.none )
 
-        ( ProjectBuilt id, Settings sharedData ) ->
-            ( Settings { sharedData | projects = Dict.update id (Maybe.map (\p -> { p | building = False })) sharedData.projects }
-            , Cmd.none
-            )
+                                Err _ ->
+                                    ( ProjectList
+                                        { projects = Dict.empty
+                                        , editor = NoEditor
+                                        , activeProject = ""
+                                        }
+                                    , Cmd.none
+                                    )
+
+                        ( "LOAD_PROJECTS", ProjectList sharedData ) ->
+                            case Json.Decode.decodeValue decodeProjects payload of
+                                Ok projects ->
+                                    ( ProjectList { sharedData | projects = projects }, Cmd.none )
+
+                                Err err ->
+                                    -- Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
+                                    ( model, Cmd.none )
+
+                        ( "LOAD_PROJECTS", Settings sharedData ) ->
+                            case Json.Decode.decodeValue decodeProjects payload of
+                                Ok projects ->
+                                    ( Settings { sharedData | projects = projects }, Cmd.none )
+
+                                Err err ->
+                                    -- Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
+                                    ( model, Cmd.none )
+
+                        ( "LOAD_PROJECTS", NewProject sharedData newProject ) ->
+                            case Json.Decode.decodeValue decodeProjects payload of
+                                Ok projects ->
+                                    ( NewProject { sharedData | projects = projects } newProject, Cmd.none )
+
+                                Err err ->
+                                    -- Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
+                                    ( model, Cmd.none )
+
+                        ( "LOAD_PROJECT", ProjectList sharedData ) ->
+                            case Json.Decode.decodeValue decodeProjects payload of
+                                Ok project ->
+                                    ( ProjectList
+                                        { sharedData
+                                            | projects = Dict.union project sharedData.projects
+                                            , activeProject =
+                                                case project |> Dict.toList |> List.head |> Maybe.map Tuple.first of
+                                                    Just id ->
+                                                        id
+
+                                                    Nothing ->
+                                                        sharedData.activeProject
+                                        }
+                                    , Cmd.none
+                                    )
+
+                                Err err ->
+                                    -- Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
+                                    ( model, Cmd.none )
+
+                        ( "LOAD_PROJECT", Settings sharedData ) ->
+                            case Json.Decode.decodeValue decodeProjects payload of
+                                Ok project ->
+                                    ( Settings
+                                        { sharedData
+                                            | projects = Dict.union project sharedData.projects
+                                            , activeProject =
+                                                case project |> Dict.toList |> List.head |> Maybe.map Tuple.first of
+                                                    Just id ->
+                                                        id
+
+                                                    Nothing ->
+                                                        sharedData.activeProject
+                                        }
+                                    , Cmd.none
+                                    )
+
+                                Err err ->
+                                    -- Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
+                                    ( model, Cmd.none )
+
+                        ( "LOAD_PROJECT", NewProject sharedData newProject ) ->
+                            case Json.Decode.decodeValue decodeProjects payload of
+                                Ok project ->
+                                    ( NewProject
+                                        { sharedData
+                                            | projects = Dict.union project sharedData.projects
+                                            , activeProject =
+                                                case project |> Dict.toList |> List.head |> Maybe.map Tuple.first of
+                                                    Just id ->
+                                                        id
+
+                                                    Nothing ->
+                                                        sharedData.activeProject
+                                        }
+                                        newProject
+                                    , Cmd.none
+                                    )
+
+                                Err err ->
+                                    -- Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
+                                    ( model, Cmd.none )
+
+                        ( "PROJECT_CREATED", NewProject sharedData (Creating data) ) ->
+                            case Json.Decode.decodeValue Json.Decode.string payload of
+                                Ok name ->
+                                    if name == data.name then
+                                        ( ProjectList sharedData, Cmd.none )
+
+                                    else
+                                        ( model, Cmd.none )
+
+                                Err err ->
+                                    Debug.log (Json.Decode.errorToString err) ( model, Cmd.none )
+
+                        ( "PROJECT_DELETED", ProjectList sharedData ) ->
+                            case Json.Decode.decodeValue Json.Decode.string payload of
+                                Ok id ->
+                                    ( ProjectList { sharedData | projects = Dict.remove id sharedData.projects }, Cmd.none )
+
+                                Err _ ->
+                                    ( model, Cmd.none )
+
+                        ( "PROJECT_DELETED", Settings sharedData ) ->
+                            case Json.Decode.decodeValue Json.Decode.string payload of
+                                Ok id ->
+                                    ( Settings { sharedData | projects = Dict.remove id sharedData.projects }, Cmd.none )
+
+                                Err _ ->
+                                    ( model, Cmd.none )
+
+                        ( "PROJECT_DELETED", NewProject sharedData newProject ) ->
+                            case Json.Decode.decodeValue Json.Decode.string payload of
+                                Ok id ->
+                                    ( NewProject { sharedData | projects = Dict.remove id sharedData.projects } newProject, Cmd.none )
+
+                                Err _ ->
+                                    ( model, Cmd.none )
+
+                        ( "PROJECT_BUILT", ProjectList sharedData ) ->
+                            case Json.Decode.decodeValue Json.Decode.string payload of
+                                Ok id ->
+                                    ( ProjectList { sharedData | projects = Dict.update id (Maybe.map (\p -> { p | building = False })) sharedData.projects }
+                                    , Cmd.none
+                                    )
+
+                                Err _ ->
+                                    ( model, Cmd.none )
+
+                        ( "PROJECT_BUILT", NewProject sharedData newProject ) ->
+                            case Json.Decode.decodeValue Json.Decode.string payload of
+                                Ok id ->
+                                    ( NewProject
+                                        { sharedData | projects = Dict.update id (Maybe.map (\p -> { p | building = False })) sharedData.projects }
+                                        newProject
+                                    , Cmd.none
+                                    )
+
+                                Err _ ->
+                                    ( model, Cmd.none )
+
+                        ( "PROJECT_BUILT", Settings sharedData ) ->
+                            case Json.Decode.decodeValue Json.Decode.string payload of
+                                Ok id ->
+                                    ( Settings { sharedData | projects = Dict.update id (Maybe.map (\p -> { p | building = False })) sharedData.projects }
+                                    , Cmd.none
+                                    )
+
+                                Err _ ->
+                                    ( model, Cmd.none )
+
+                        _ ->
+                            Debug.todo ("Unhandled message from Main: " ++ action ++ ", " ++ Debug.toString payload)
 
         _ ->
             ( model, Cmd.none )
@@ -869,7 +878,7 @@ viewProjectDetails editor id maybeProject =
 
 
 viewSettings : SharedModel -> Element Msg
-viewSettings { editor } =
+viewSettings _ =
     Element.column
         [ Background.color Color.primary
         , Element.spacing 16
@@ -878,38 +887,7 @@ viewSettings { editor } =
         , Element.centerY
         , Border.rounded 3
         ]
-        [ Input.radio
-            []
-            { onChange = EditorSelected
-            , selected =
-                case editor of
-                    NoEditor ->
-                        Nothing
-
-                    editorSelected ->
-                        Just editorSelected
-            , label = Input.labelAbove [] (Element.text "Editor:")
-            , options =
-                List.map
-                    (\ed ->
-                        Input.option
-                            ed
-                            (Element.row
-                                [ Element.spacing 8
-                                , Element.padding 8
-                                ]
-                                [ Input.button
-                                    [ Font.underline ]
-                                    { onPress = Just (DownloadEditor (editorUrl ed))
-                                    , label = Element.text "Download"
-                                    }
-                                , Element.text (editorName ed)
-                                ]
-                            )
-                    )
-                    editorOptions
-            }
-        , Ui.button
+        [ Ui.button
             [ Element.alignBottom
             , Element.alignRight
             ]

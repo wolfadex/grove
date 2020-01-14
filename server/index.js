@@ -3,6 +3,7 @@ const { app, BrowserWindow, ipcMain, shell, dialog } = require("electron");
 const path = require("path");
 const { spawn } = require("child_process");
 const fs = require("fs-extra");
+const launch = require("launch-editor");
 const settings = require("electron-settings");
 const Bundler = require("parcel-bundler");
 const elmLicenseFinder = require("elm-license-finder");
@@ -40,7 +41,7 @@ function createWindow(startupConfig) {
   }
 
   mainWindow.webContents.on("did-finish-load", function() {
-    mainWindow.webContents.send("startup-config", { editor });
+    sendToClient("MAIN_STARTED", { editor });
     loadProjects();
   });
 
@@ -117,9 +118,7 @@ async function loadProjects() {
     }
   }
 
-  if (mainWindow != null) {
-    mainWindow.webContents.send("load-projects", projects);
-  }
+  sendToClient("LOAD_PROJECTS", projects);
 }
 
 async function loadProject(projectPath) {
@@ -172,51 +171,6 @@ async function loadProject(projectPath) {
   }
 }
 
-ipcMain.on("new-project", async function(e, projectData) {
-  try {
-    const projectPath = path.resolve(PROJECTS_ROOT, projectData.name);
-
-    await fs.mkdir(projectPath);
-    // Copy over template files
-    await fs.copy(path.resolve(__dirname, "template/common"), projectPath);
-    // Rename .gitignore
-    await fs.move(
-      path.resolve(projectPath, "gitignore"),
-      path.resolve(projectPath, ".gitignore"),
-    );
-    // Create .groverc
-    await fs.writeFile(
-      path.resolve(projectPath, ".groverc"),
-      templates.groverc(projectData.name),
-    );
-    // Create index.html
-    await fs.writeFile(
-      path.resolve(projectPath, "src/index.html"),
-      templates.html(projectData.name),
-    );
-    // Create Elm file
-    await fs.writeFile(
-      path.resolve(projectPath, "src/Main.elm"),
-      templates.elmSandbox(projectData.name),
-    );
-
-    try {
-      const project = await loadProject(projectPath);
-
-      e.reply("load-project", {
-        [projectPath]: { ...project, directoryName: projectData.name },
-      });
-    } catch (error) {
-      devLog("Re-get projects error", error);
-    }
-
-    e.reply("project-created", projectData.name);
-  } catch (error) {
-    devLog("Create project error", error);
-    e.reply("error-creating-project", { name: projectData.name, error });
-  }
-});
-
 function exec(command, args, options) {
   return new Promise(function(resolve, reject) {
     console.log(command);
@@ -248,10 +202,6 @@ ipcMain.on("set-email", function(e, email) {
   settings.set("email", email);
 });
 
-ipcMain.on("save-editor", function(e, editor) {
-  settings.set("editor", editor);
-});
-
 const parcelServers = {};
 
 function killAllServers() {
@@ -259,32 +209,6 @@ function killAllServers() {
     server.close();
   });
 }
-
-ipcMain.on("dev-project", async function(e, [editorCmd, projectPath]) {
-  if (editorCmd != null) {
-    devLog("Open editor", editorCmd);
-    exec(editorCmd, ["."], { cwd: path.resolve(projectPath, "src") });
-
-    if (parcelServers[projectPath] == null) {
-      devLog("Start parcel");
-      const entryFile = path.join(projectPath, "src/index.html");
-      const bundler = new Bundler(entryFile, {
-        watch: true,
-        minify: false,
-        outDir: path.resolve(projectPath, "dist"),
-        cacheDir: path.resolve(projectPath, ".cache"),
-      });
-      const server = await bundler.serve();
-      parcelServers[projectPath] = server;
-      shell.openExternal(`http://localhost:${server.address().port}`);
-    } else {
-      devLog("Parcel already running for this project");
-      shell.openExternal(
-        `http://localhost:${parcelServers[projectPath].address().port}`,
-      );
-    }
-  }
-});
 
 ipcMain.on("stop-project-server", function(e, projectPath) {
   const server = parcelServers[projectPath];
@@ -295,14 +219,10 @@ ipcMain.on("stop-project-server", function(e, projectPath) {
   }
 });
 
-ipcMain.on("delete-confirmed", async function(e, projectPath) {
-  deleteProject(e, projectPath);
-});
-
-async function deleteProject(e, projectPath) {
+async function deleteProject(projectPath) {
   await fs.remove(path.resolve(PROJECTS_ROOT, projectPath));
 
-  e.reply("delete-project", projectPath);
+  sendToClient("PROJECT_DELETED", projectPath);
 
   const server = parcelServers[projectPath];
 
@@ -316,67 +236,181 @@ ipcMain.on("test-project", function(e, projectPath) {
   // TODO:
 });
 
-ipcMain.on("build-project", async function(e, projectPath) {
-  // Clear an previous build
-  await fs.remove(path.resolve(PROJECTS_ROOT, projectPath, "dist"));
+ipcMain.on("client-to-main", async function(_, { action, payload }) {
+  switch (action) {
+    case "CREATE_PROJECT":
+      {
+        try {
+          console.log("Carl", 1);
+          const projectPath = path.resolve(PROJECTS_ROOT, payload.name);
 
-  const entryFile = path.join(projectPath, "src/index.html");
-  const bundler = new Bundler(entryFile, {
-    watch: false,
-    minify: true,
-    outDir: path.resolve(projectPath, "dist"),
-    cacheDir: path.resolve(projectPath, ".cache"),
-    production: true,
-  });
+          await fs.mkdir(projectPath);
+          // Copy over template files
+          await fs.copy(
+            path.resolve(__dirname, "template/common"),
+            projectPath,
+          );
+          console.log("Carl", 2);
+          // Rename .gitignore
+          await fs.move(
+            path.resolve(projectPath, "gitignore"),
+            path.resolve(projectPath, ".gitignore"),
+          );
+          // Create .groverc
+          await fs.writeFile(
+            path.resolve(projectPath, ".groverc"),
+            templates.groverc(payload.name),
+          );
+          console.log("Carl", 3);
+          // Create index.html
+          await fs.writeFile(
+            path.resolve(projectPath, "src/index.html"),
+            templates.html(payload.name),
+          );
+          // Create Elm file
+          await fs.writeFile(
+            path.resolve(projectPath, "src/Main.elm"),
+            templates.elmSandbox(payload.name),
+          );
+          console.log("Carl", 4);
+          try {
+            const project = await loadProject(projectPath);
+            sendToClient("LOAD_PROJECT", {
+              [projectPath]: { ...project, directoryName: payload.name },
+            });
+            console.log("Carl", 5);
+          } catch (error) {
+            devLog("Re-get projects error", error);
+          }
+          console.log("Carl", 6);
+          sendToClient("PROJECT_CREATED", payload.name);
+        } catch (error) {
+          devLog("Create project error", error);
+          sendToClient("ERROR_CREATING_PROJECT", { name: payload.name, error });
+          console.log("Carl", 7);
+        }
+      }
+      break;
+    case "DEVELOP_PROJECT":
+      {
+        devLog("Open editor", payload.editor);
+        launch(
+          path.resolve(payload.projectPath),
+          payload.editor,
+          (fileName, errorMsg) => {
+            devLog(fileName, errorMsg);
+          },
+        );
 
-  try {
-    await bundler.bundle();
-    shell.showItemInFolder(path.join(projectPath, "dist"));
-    e.reply("project-built", projectPath);
-  } catch (error) {
-    devLog("Build error", error);
-    e.reply("project-build-error", error);
+        if (parcelServers[payload.projectPath] == null) {
+          devLog("Start parcel");
+          const entryFile = path.join(payload.projectPath, "src/index.html");
+          const bundler = new Bundler(entryFile, {
+            watch: true,
+            minify: false,
+            outDir: path.resolve(payload.projectPath, "dist"),
+            cacheDir: path.resolve(payload.projectPath, ".cache"),
+          });
+          const server = await bundler.serve();
+          parcelServers[payload.projectPath] = server;
+          shell.openExternal(`http://localhost:${server.address().port}`);
+        } else {
+          devLog("Parcel already running for this project");
+          shell.openExternal(
+            `http://localhost:${
+              parcelServers[payload.projectPath].address().port
+            }`,
+          );
+        }
+      }
+      break;
+    case "SAVE_EDITOR":
+      {
+        settings.set("editor", payload);
+      }
+      break;
+    case "CONFIRM_DELETE":
+      {
+        const { response } = await dialog.showMessageBox({
+          type: "question",
+          buttons: ["Cancel", "Delete"],
+          title: "Delete Project?",
+          message: `Are you sure you want to delete ${payload.name}?`,
+        });
+
+        if (response === 1) {
+          deleteProject(payload.projectPath);
+        }
+      }
+      break;
+    case "EJECT_PROJECT":
+      {
+        // Get output directory
+        const response = await dialog.showOpenDialog({
+          title: "Where to Eject to",
+          buttonLabel: "Eject",
+          properties: ["openDirectory", "createDirectory"],
+        });
+
+        if (!response.canceled) {
+          // Add remaining files needed for an ejected project
+          const groverc = await fs.readFile(
+            path.resolve(PROJECTS_ROOT, payload, ".groverc"),
+          );
+          const { name } = JSON.parse(groverc);
+          // Copy over eject files
+          await fs.copy(path.resolve(__dirname, "template/eject"), payload);
+          // Create README
+          await fs.writeFile(
+            path.resolve(payload, "README.md"),
+            templates.readme(name),
+          );
+          // Create package.json
+          await fs.writeFile(
+            path.resolve(payload, "package.json"),
+            templates.packageJson(name),
+          );
+
+          const outputPath = path.resolve(response.filePaths[0], name);
+          // Eject
+          await fs.copy(path.resolve(PROJECTS_ROOT, payload), outputPath);
+          // Delete old project files
+          await deleteProject(payload);
+          // Show ejected project to user
+          shell.showItemInFolder(outputPath);
+        }
+      }
+      break;
+    case "BUILD_PROJECT":
+      {
+        // Clear an previous build
+        await fs.remove(path.resolve(PROJECTS_ROOT, projectPath, "dist"));
+
+        const entryFile = path.join(projectPath, "src/index.html");
+        const bundler = new Bundler(entryFile, {
+          watch: false,
+          minify: true,
+          outDir: path.resolve(projectPath, "dist"),
+          cacheDir: path.resolve(projectPath, ".cache"),
+          production: true,
+        });
+
+        try {
+          await bundler.bundle();
+          shell.showItemInFolder(path.join(projectPath, "dist"));
+          sendToClient("PROJECT_BUILT", projectPath);
+        } catch (error) {
+          devLog("Build error", error);
+          e.reply("project-build-error", error);
+        }
+        // TODO: Should more happen here? Maybe hookup to a static host?
+      }
+      break;
   }
-  // TODO: Should more happen here? Maybe hookup to a static host?
 });
 
-ipcMain.on("download-editor", function(e, url) {
-  shell.openExternal(url);
-});
-
-ipcMain.on("eject-project", async function(e, projectPath) {
-  // Get output directory
-  const response = await dialog.showOpenDialog({
-    title: "Where to Eject to",
-    buttonLabel: "Eject",
-    properties: ["openDirectory", "createDirectory"],
-  });
-
-  if (!response.canceled) {
-    // Add remaining files needed for an ejected project
-    const groverc = await fs.readFile(
-      path.resolve(PROJECTS_ROOT, projectPath, ".groverc"),
-    );
-    const { name } = JSON.parse(groverc);
-    // Copy over eject files
-    await fs.copy(path.resolve(__dirname, "template/eject"), projectPath);
-    // Create README
-    await fs.writeFile(
-      path.resolve(projectPath, "README.md"),
-      templates.readme(name),
-    );
-    // Create package.json
-    await fs.writeFile(
-      path.resolve(projectPath, "package.json"),
-      templates.packageJson(name),
-    );
-
-    const outputPath = path.resolve(response.filePaths[0], name);
-    // Eject
-    await fs.copy(path.resolve(PROJECTS_ROOT, projectPath), outputPath);
-    // Delete old project files
-    await deleteProject(e, projectPath);
-    // Show ejected project to user
-    shell.showItemInFolder(outputPath);
+function sendToClient(action, payload) {
+  if (mainWindow != null && mainWindow.webContents) {
+    mainWindow.webContents.send("main-to-client", { action, payload });
   }
-});
+}

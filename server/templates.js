@@ -67,7 +67,10 @@ function groverc(name) {
     "angle": ${Math.floor(Math.random() * 9)},
     "color": ${JSON.stringify(randomColor())}
   },
-  "name": "${name}"
+  "name": "${name}",
+  "tests": {
+    "status": null
+  }
 }`;
 }
 

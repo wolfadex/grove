@@ -1,11 +1,10 @@
-module Ui exposing (button, customStyles, text, whiteSpacePre)
+module Ui exposing (button, text, whiteSpacePre)
 
 import Element exposing (Attribute, Element)
 import Element.Background as Background
 import Element.Border as Border
 import Element.Font as Font
 import Element.Input as Input
-import Html
 import Html.Attributes
 import Ui.Color as Color
 
@@ -23,6 +22,7 @@ button attributes { onPress, label } =
          , Font.color Color.shadeLight
          , Border.rounded 3
          , Element.paddingXY 16 8
+         , button3D
          ]
             ++ attributes
         )
@@ -47,12 +47,6 @@ whiteSpacePre =
     Html.Attributes.class "wolfadex__elm-text-adventure__white-space_pre" |> Element.htmlAttribute
 
 
-customStyles : Element msg
-customStyles =
-    Element.html <|
-        Html.node "style"
-            []
-            [ Html.text """
-.wolfadex__elm-text-adventure__white-space_pre > .t {
-  white-space: pre-wrap !important;
-}""" ]
+button3D : Element.Attribute msg
+button3D =
+    Html.Attributes.class "three-d" |> Element.htmlAttribute
