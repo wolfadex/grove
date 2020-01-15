@@ -41,7 +41,7 @@ function createWindow(startupConfig) {
   }
 
   mainWindow.webContents.on("did-finish-load", function() {
-    sendToClient("MAIN_STARTED", { editor });
+    // sendToClient("MAIN_STARTED", { editor });
     loadProjects();
   });
 
@@ -194,14 +194,6 @@ function exec(command, args, options) {
   });
 }
 
-ipcMain.on("set-name", function(e, name) {
-  settings.set("name", name);
-});
-
-ipcMain.on("set-email", function(e, email) {
-  settings.set("email", email);
-});
-
 const parcelServers = {};
 
 function killAllServers() {
@@ -209,15 +201,6 @@ function killAllServers() {
     server.close();
   });
 }
-
-ipcMain.on("stop-project-server", function(e, projectPath) {
-  const server = parcelServers[projectPath];
-
-  if (server) {
-    server.close();
-    delete parcelServers[projectPath];
-  }
-});
 
 async function deleteProject(projectPath) {
   await fs.remove(path.resolve(PROJECTS_ROOT, projectPath));
@@ -326,6 +309,7 @@ ipcMain.on("client-to-main", async function(_, { action, payload }) {
           const server = await bundler.serve();
           parcelServers[payload.projectPath] = server;
           shell.openExternal(`http://localhost:${server.address().port}`);
+          sendToClient("PROJECT_SERVER_STARTED", payload.projectPath);
         } else {
           devLog("Parcel already running for this project");
           shell.openExternal(
@@ -333,6 +317,17 @@ ipcMain.on("client-to-main", async function(_, { action, payload }) {
               parcelServers[payload.projectPath].address().port
             }`,
           );
+        }
+      }
+      break;
+    case "STOP_DEV_SERVER":
+      {
+        const server = parcelServers[payload.projectPath];
+
+        if (server) {
+          server.close();
+          delete parcelServers[payload.projectPath];
+          sendToClient("PROJECT_SERVER_STOPPED", payload.projectPath);
         }
       }
       break;
@@ -395,25 +390,29 @@ ipcMain.on("client-to-main", async function(_, { action, payload }) {
       break;
     case "BUILD_PROJECT":
       {
-        // Clear an previous build
-        await fs.remove(path.resolve(PROJECTS_ROOT, projectPath, "dist"));
-
-        const entryFile = path.join(projectPath, "src/index.html");
-        const bundler = new Bundler(entryFile, {
-          watch: false,
-          minify: true,
-          outDir: path.resolve(projectPath, "dist"),
-          cacheDir: path.resolve(projectPath, ".cache"),
-          production: true,
-        });
+        try {
+          // Clear any previous build
+          await fs.remove(path.resolve(PROJECTS_ROOT, payload, "dist"));
+        } catch (_) {
+          // Ignore delete if it doesn't exist
+        }
 
         try {
+          const entryFile = path.join(payload, "src/index.html");
+          const bundler = new Bundler(entryFile, {
+            watch: false,
+            minify: true,
+            outDir: path.resolve(payload, "dist"),
+            cacheDir: path.resolve(payload, ".cache"),
+            production: true,
+          });
+
           await bundler.bundle();
-          shell.showItemInFolder(path.join(projectPath, "dist"));
-          sendToClient("PROJECT_BUILT", projectPath);
+          shell.showItemInFolder(path.join(payload, "dist"));
+          sendToClient("PROJECT_BUILT", payload);
         } catch (error) {
           devLog("Build error", error);
-          e.reply("project-build-error", error);
+          sendToClient("PROJECT_BUILD_ERROR", { projectPath: payload, error });
         }
         // TODO: Should more happen here? Maybe hookup to a static host?
       }

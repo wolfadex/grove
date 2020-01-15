@@ -30,17 +30,23 @@ main =
 ---- TYPES ----
 
 
-type Model
-    = Loading
-    | ProjectList SharedModel String
-    | Settings SharedModel
-    | NewProject SharedModel NewProjectBuilder
-
-
-type alias SharedModel =
-    { projects : Dict Id Project
-    , activeProject : Id
+type alias Model =
+    { projects : Loadable (Dict Id Project)
+    , state : State
     }
+
+
+type State
+    = ProjectList String
+    | ProjectDetails Id
+    | Settings
+    | NewProject NewProjectBuilder
+
+
+type Loadable d
+    = Loading
+    | Success d
+    | Failure String
 
 
 type NewProjectBuilder
@@ -201,6 +207,7 @@ type alias Project =
     , icon : Icon
     , dependencies : Dict Name Dependency
     , building : Bool
+    , devServerRunning : Bool
     }
 
 
@@ -250,9 +257,11 @@ type Msg
     | SetNewProjectElmProgram ElmProgram
     | CreateNewProject
     | Develop Id
+    | StopServer Id
     | SetProjectFilter String
     | DeleteProject Id String
     | ViewProjectDetails Id
+    | ViewProjectList
     | Eject Id
     | BuildProject Id
     | FromMain Value
@@ -264,7 +273,9 @@ type Msg
 
 init : () -> ( Model, Cmd Msg )
 init _ =
-    ( Loading
+    ( { projects = Loading
+      , state = ProjectList ""
+      }
     , Cmd.none
     )
 
@@ -318,59 +329,82 @@ decodeMainMessage =
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
-    case ( msg, model ) of
-        ( ShowSettings, ProjectList sharedData _ ) ->
-            ( Settings sharedData, Cmd.none )
+    case msg of
+        ShowSettings ->
+            ( model, Cmd.none )
 
-        ( HideSettings, Settings sharedData ) ->
-            ( ProjectList sharedData "", Cmd.none )
+        HideSettings ->
+            ( model, Cmd.none )
 
-        ( SetProjectFilter filter, ProjectList sharedData _ ) ->
-            ( ProjectList sharedData filter, Cmd.none )
+        ViewProjectList ->
+            ( { model | state = ProjectList "" }, Cmd.none )
 
-        ( ShowNewProjectForm, ProjectList sharedData _ ) ->
-            ( NewProject sharedData baseNewProjectModel, Cmd.none )
+        SetProjectFilter filter ->
+            case model.state of
+                ProjectList _ ->
+                    ( { model | state = ProjectList filter }, Cmd.none )
 
-        ( HideNewProjectForm, NewProject sharedData _ ) ->
-            ( ProjectList sharedData "", Cmd.none )
-
-        ( SetNewProjectName name, NewProject sharedData newProject ) ->
-            case newProject of
-                Building data error ->
-                    ( NewProject sharedData (Building { data | name = name } error), Cmd.none )
-
-                Creating _ ->
+                _ ->
                     ( model, Cmd.none )
 
-        ( SetNewProjectAuthor author, NewProject sharedData newProject ) ->
-            case newProject of
-                Building data error ->
-                    ( NewProject sharedData (Building { data | author = author } error), Cmd.none )
+        ShowNewProjectForm ->
+            case model.state of
+                ProjectList _ ->
+                    ( { model | state = NewProject baseNewProjectModel }, Cmd.none )
 
-                Creating _ ->
+                _ ->
                     ( model, Cmd.none )
 
-        ( SetNewProjectElmProgram elmProgram, NewProject sharedData newProject ) ->
-            case newProject of
-                Building data error ->
-                    ( NewProject sharedData (Building { data | elmProgram = elmProgram } error), Cmd.none )
+        HideNewProjectForm ->
+            case model.state of
+                NewProject _ ->
+                    ( { model | state = ProjectList "" }, Cmd.none )
 
-                Creating _ ->
+                _ ->
                     ( model, Cmd.none )
 
-        ( CreateNewProject, NewProject sharedData (Building data _) ) ->
-            case parseNewProject data of
-                Ok project ->
-                    ( NewProject sharedData (Creating data)
-                    , project
-                        |> encodeNewProject
-                        |> toMain "CREATE_PROJECT"
-                    )
+        SetNewProjectName name ->
+            case model.state of
+                NewProject (Building data error) ->
+                    ( { model | state = NewProject (Building { data | name = name } error) }, Cmd.none )
 
-                Err err ->
-                    ( NewProject sharedData (Building data (Just err)), Cmd.none )
+                _ ->
+                    ( model, Cmd.none )
 
-        ( Develop id, ProjectList _ _ ) ->
+        SetNewProjectAuthor author ->
+            case model.state of
+                NewProject (Building data error) ->
+                    ( { model | state = NewProject (Building { data | author = author } error) }, Cmd.none )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        SetNewProjectElmProgram elmProgram ->
+            case model.state of
+                NewProject (Building data error) ->
+                    ( { model | state = NewProject (Building { data | elmProgram = elmProgram } error) }, Cmd.none )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        CreateNewProject ->
+            case model.state of
+                NewProject (Building data _) ->
+                    case parseNewProject data of
+                        Ok project ->
+                            ( { model | state = NewProject (Creating data) }
+                            , project
+                                |> encodeNewProject
+                                |> toMain "CREATE_PROJECT"
+                            )
+
+                        Err err ->
+                            ( { model | state = NewProject (Building data (Just err)) }, Cmd.none )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        Develop id ->
             ( model
             , toMain
                 "DEVELOP_PROJECT"
@@ -380,7 +414,17 @@ update msg model =
                 )
             )
 
-        ( DeleteProject id name, ProjectList _ _ ) ->
+        StopServer id ->
+            ( model
+            , toMain
+                "STOP_DEV_SERVER"
+                (Json.Encode.object
+                    [ ( "projectPath", Json.Encode.string id )
+                    ]
+                )
+            )
+
+        DeleteProject id name ->
             ( model
             , toMain
                 "CONFIRM_DELETE"
@@ -391,92 +435,72 @@ update msg model =
                 )
             )
 
-        ( ViewProjectDetails id, ProjectList sharedData filter ) ->
-            ( ProjectList { sharedData | activeProject = id } filter, Cmd.none )
+        ViewProjectDetails id ->
+            case model.state of
+                ProjectList _ ->
+                    ( { model | state = ProjectDetails id }, Cmd.none )
 
-        ( Eject id, _ ) ->
+                _ ->
+                    ( model, Cmd.none )
+
+        Eject id ->
             ( model, toMain "EJECT_PROJECT" (Json.Encode.string id) )
 
-        ( BuildProject id, ProjectList sharedData filter ) ->
-            ( ProjectList { sharedData | projects = Dict.update id (Maybe.map (\p -> { p | building = True })) sharedData.projects } filter
+        BuildProject id ->
+            ( { model | projects = updateProjects id (Maybe.map (\p -> { p | building = True })) model.projects }
             , toMain "BUILD_PROJECT" (Json.Encode.string id)
             )
 
-        ( BuildProject id, NewProject sharedData newProject ) ->
-            ( NewProject
-                { sharedData | projects = Dict.update id (Maybe.map (\p -> { p | building = True })) sharedData.projects }
-                newProject
-            , toMain "BUILD_PROJECT" (Json.Encode.string id)
-            )
-
-        ( BuildProject id, Settings sharedData ) ->
-            ( Settings { sharedData | projects = Dict.update id (Maybe.map (\p -> { p | building = True })) sharedData.projects }
-            , toMain "BUILD_PROJECT" (Json.Encode.string id)
-            )
-
-        ( FromMain value, _ ) ->
+        FromMain value ->
             case Json.Decode.decodeValue decodeMainMessage value of
                 Err err ->
                     ( model, Cmd.none )
 
                 Ok { action, payload } ->
-                    case ( action, model ) of
-                        ( "MAIN_STARTED", Loading ) ->
-                            case Json.Decode.decodeValue decodeStartup payload of
-                                Ok data ->
-                                    ( ProjectList data "", Cmd.none )
-
-                                Err _ ->
-                                    ( ProjectList
-                                        { projects = Dict.empty
-                                        , activeProject = ""
-                                        }
-                                        ""
-                                    , Cmd.none
-                                    )
-
-                        ( "LOAD_PROJECTS", ProjectList sharedData filter ) ->
+                    case action of
+                        -- ( "MAIN_STARTED", Loading ) ->
+                        --     case Json.Decode.decodeValue decodeStartup payload of
+                        --         Ok data ->
+                        --             ( ProjectList data "", Cmd.none )
+                        --         Err _ ->
+                        --             ( ProjectList
+                        --                 { projects = Dict.empty
+                        --                 , activeProject = ""
+                        --                 }
+                        --                 ""
+                        --             , Cmd.none
+                        --             )
+                        "LOAD_PROJECTS" ->
                             case Json.Decode.decodeValue decodeProjects payload of
                                 Ok projects ->
-                                    ( ProjectList { sharedData | projects = projects } filter, Cmd.none )
+                                    ( { model | projects = Success projects }, Cmd.none )
 
                                 Err err ->
                                     -- Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
                                     ( model, Cmd.none )
 
-                        ( "LOAD_PROJECTS", Settings sharedData ) ->
-                            case Json.Decode.decodeValue decodeProjects payload of
-                                Ok projects ->
-                                    ( Settings { sharedData | projects = projects }, Cmd.none )
-
-                                Err err ->
-                                    -- Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
-                                    ( model, Cmd.none )
-
-                        ( "LOAD_PROJECTS", NewProject sharedData newProject ) ->
-                            case Json.Decode.decodeValue decodeProjects payload of
-                                Ok projects ->
-                                    ( NewProject { sharedData | projects = projects } newProject, Cmd.none )
-
-                                Err err ->
-                                    -- Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
-                                    ( model, Cmd.none )
-
-                        ( "LOAD_PROJECT", ProjectList sharedData filter ) ->
+                        "LOAD_PROJECT" ->
                             case Json.Decode.decodeValue decodeProjects payload of
                                 Ok project ->
-                                    ( ProjectList
-                                        { sharedData
-                                            | projects = Dict.union project sharedData.projects
-                                            , activeProject =
-                                                case project |> Dict.toList |> List.head |> Maybe.map Tuple.first of
-                                                    Just id ->
-                                                        id
+                                    ( { model
+                                        | projects =
+                                            case model.projects of
+                                                Loading ->
+                                                    Loading
 
-                                                    Nothing ->
-                                                        sharedData.activeProject
-                                        }
-                                        filter
+                                                Failure _ ->
+                                                    Success project
+
+                                                Success projects ->
+                                                    Success (Dict.union project projects)
+                                        , state =
+                                            case project |> Dict.toList |> List.head |> Maybe.map Tuple.first of
+                                                Just id ->
+                                                    ProjectDetails id
+
+                                                Nothing ->
+                                                    model.state
+                                      }
                                     , Cmd.none
                                     )
 
@@ -484,111 +508,66 @@ update msg model =
                                     -- Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
                                     ( model, Cmd.none )
 
-                        ( "LOAD_PROJECT", Settings sharedData ) ->
-                            case Json.Decode.decodeValue decodeProjects payload of
-                                Ok project ->
-                                    ( Settings
-                                        { sharedData
-                                            | projects = Dict.union project sharedData.projects
-                                            , activeProject =
-                                                case project |> Dict.toList |> List.head |> Maybe.map Tuple.first of
-                                                    Just id ->
-                                                        id
-
-                                                    Nothing ->
-                                                        sharedData.activeProject
-                                        }
-                                    , Cmd.none
-                                    )
-
-                                Err err ->
-                                    -- Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
-                                    ( model, Cmd.none )
-
-                        ( "LOAD_PROJECT", NewProject sharedData newProject ) ->
-                            case Json.Decode.decodeValue decodeProjects payload of
-                                Ok project ->
-                                    ( NewProject
-                                        { sharedData
-                                            | projects = Dict.union project sharedData.projects
-                                            , activeProject =
-                                                case project |> Dict.toList |> List.head |> Maybe.map Tuple.first of
-                                                    Just id ->
-                                                        id
-
-                                                    Nothing ->
-                                                        sharedData.activeProject
-                                        }
-                                        newProject
-                                    , Cmd.none
-                                    )
-
-                                Err err ->
-                                    -- Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
-                                    ( model, Cmd.none )
-
-                        ( "PROJECT_CREATED", NewProject sharedData (Creating data) ) ->
-                            case Json.Decode.decodeValue Json.Decode.string payload of
-                                Ok name ->
+                        "PROJECT_CREATED" ->
+                            case ( Json.Decode.decodeValue Json.Decode.string payload, model.state ) of
+                                ( Ok name, NewProject (Creating data) ) ->
                                     if name == data.name then
-                                        ( ProjectList sharedData "", Cmd.none )
+                                        ( { model | state = ProjectList "" }, Cmd.none )
 
                                     else
                                         ( model, Cmd.none )
 
-                                Err err ->
+                                ( Ok _, _ ) ->
+                                    ( model, Cmd.none )
+
+                                ( Err err, _ ) ->
                                     Debug.log (Json.Decode.errorToString err) ( model, Cmd.none )
 
-                        ( "PROJECT_DELETED", ProjectList sharedData filter ) ->
+                        "PROJECT_DELETED" ->
                             case Json.Decode.decodeValue Json.Decode.string payload of
                                 Ok id ->
-                                    ( ProjectList { sharedData | projects = Dict.remove id sharedData.projects } filter, Cmd.none )
+                                    ( { model
+                                        | projects =
+                                            case model.projects of
+                                                Loading ->
+                                                    Loading
 
-                                Err _ ->
-                                    ( model, Cmd.none )
+                                                Failure e ->
+                                                    Failure e
 
-                        ( "PROJECT_DELETED", Settings sharedData ) ->
-                            case Json.Decode.decodeValue Json.Decode.string payload of
-                                Ok id ->
-                                    ( Settings { sharedData | projects = Dict.remove id sharedData.projects }, Cmd.none )
-
-                                Err _ ->
-                                    ( model, Cmd.none )
-
-                        ( "PROJECT_DELETED", NewProject sharedData newProject ) ->
-                            case Json.Decode.decodeValue Json.Decode.string payload of
-                                Ok id ->
-                                    ( NewProject { sharedData | projects = Dict.remove id sharedData.projects } newProject, Cmd.none )
-
-                                Err _ ->
-                                    ( model, Cmd.none )
-
-                        ( "PROJECT_BUILT", ProjectList sharedData filter ) ->
-                            case Json.Decode.decodeValue Json.Decode.string payload of
-                                Ok id ->
-                                    ( ProjectList { sharedData | projects = Dict.update id (Maybe.map (\p -> { p | building = False })) sharedData.projects } filter
+                                                Success projects ->
+                                                    Success (Dict.remove id projects)
+                                      }
                                     , Cmd.none
                                     )
 
                                 Err _ ->
                                     ( model, Cmd.none )
 
-                        ( "PROJECT_BUILT", NewProject sharedData newProject ) ->
+                        "PROJECT_SERVER_STARTED" ->
                             case Json.Decode.decodeValue Json.Decode.string payload of
                                 Ok id ->
-                                    ( NewProject
-                                        { sharedData | projects = Dict.update id (Maybe.map (\p -> { p | building = False })) sharedData.projects }
-                                        newProject
+                                    ( { model | projects = updateProjects id (Maybe.map (\p -> { p | devServerRunning = True })) model.projects }
                                     , Cmd.none
                                     )
 
                                 Err _ ->
                                     ( model, Cmd.none )
 
-                        ( "PROJECT_BUILT", Settings sharedData ) ->
+                        "PROJECT_SERVER_STOPPED" ->
                             case Json.Decode.decodeValue Json.Decode.string payload of
                                 Ok id ->
-                                    ( Settings { sharedData | projects = Dict.update id (Maybe.map (\p -> { p | building = False })) sharedData.projects }
+                                    ( { model | projects = updateProjects id (Maybe.map (\p -> { p | devServerRunning = False })) model.projects }
+                                    , Cmd.none
+                                    )
+
+                                Err _ ->
+                                    ( model, Cmd.none )
+
+                        "PROJECT_BUILT" ->
+                            case Json.Decode.decodeValue Json.Decode.string payload of
+                                Ok id ->
+                                    ( { model | projects = updateProjects id (Maybe.map (\p -> { p | building = False })) model.projects }
                                     , Cmd.none
                                     )
 
@@ -598,19 +577,30 @@ update msg model =
                         _ ->
                             Debug.todo ("Unhandled message from Main: " ++ action ++ ", " ++ Debug.toString payload)
 
-        _ ->
-            ( model, Cmd.none )
+
+updateProjects : Id -> (Maybe Project -> Maybe Project) -> Loadable (Dict Id Project) -> Loadable (Dict Id Project)
+updateProjects id f projects =
+    case projects of
+        Loading ->
+            Loading
+
+        Failure e ->
+            Failure e
+
+        Success p ->
+            Success (Dict.update id f p)
 
 
-decodeStartup : Decoder SharedModel
-decodeStartup =
-    Json.Decode.map
-        (\activeProject ->
-            { projects = Dict.empty
-            , activeProject = activeProject
-            }
-        )
-        (Json.Decode.succeed "")
+
+-- decodeStartup : Decoder SharedModel
+-- decodeStartup =
+--     Json.Decode.map
+--         (\activeProject ->
+--             { projects = Dict.empty
+--             , activeProject = activeProject
+--             }
+--         )
+--         (Json.Decode.succeed "")
 
 
 decodeProjects : Decoder (Dict Id Project)
@@ -620,13 +610,14 @@ decodeProjects =
 
 decodeProject : Decoder Project
 decodeProject =
-    Json.Decode.map7 Project
+    Json.Decode.map8 Project
         (Json.Decode.field "projectPath" Json.Decode.string)
         (Json.Decode.field "directoryName" Json.Decode.string)
         (Json.Decode.field "projectName" Json.Decode.string)
         (Json.Decode.field "author" Json.Decode.string)
         (Json.Decode.field "icon" decodeIcon)
         (Json.Decode.field "dependencies" decodeDependencies)
+        (Json.Decode.succeed False)
         (Json.Decode.succeed False)
 
 
@@ -732,32 +723,23 @@ view model =
         , Element.height Element.fill
         , Background.color Color.shadeLight
         ]
-        (case model of
-            Loading ->
-                viewLoading
+        (case model.state of
+            ProjectList filter ->
+                viewProjectList filter model
 
-            ProjectList data filter ->
-                viewProjectList data filter
+            ProjectDetails id ->
+                viewProjectDetails id model
 
-            Settings data ->
-                viewSettings data
+            Settings ->
+                viewSettings
 
-            NewProject _ newProject ->
+            NewProject newProject ->
                 viewNewProject newProject
         )
 
 
-viewLoading : Element msg
-viewLoading =
-    Element.el
-        [ Element.centerX
-        , Element.centerY
-        ]
-        (Element.text "Loading...")
-
-
-viewProjectList : SharedModel -> String -> Element Msg
-viewProjectList { projects } filter =
+viewProjectList : String -> Model -> Element Msg
+viewProjectList filter { projects } =
     Element.column
         [ Element.width Element.fill
         , Element.height Element.fill
@@ -786,7 +768,7 @@ viewProjectList { projects } filter =
                 ]
                 [ Ui.button
                     [ Element.centerX ]
-                    { onPress = ShowNewProjectForm
+                    { onPress = Just ShowNewProjectForm
                     , label = Element.text "Create Project"
                     }
                 , Input.text
@@ -797,17 +779,25 @@ viewProjectList { projects } filter =
                     , text = filter
                     }
                 ]
-            , Keyed.column
-                [ Element.spacing 8
-                , Element.centerX
-                , Element.width Element.fill
-                , Element.scrollbarY
-                ]
-                (projects
-                    |> Dict.toList
-                    |> List.filter (\( _, p ) -> p.name |> String.toLower |> String.contains (String.toLower filter))
-                    |> List.map viewProjectItem
-                )
+            , case projects of
+                Loading ->
+                    Element.text "Loading Projects..."
+
+                Failure err ->
+                    Element.text ("Failed to load projects: " ++ err)
+
+                Success ps ->
+                    Keyed.column
+                        [ Element.spacing 8
+                        , Element.centerX
+                        , Element.width Element.fill
+                        , Element.scrollbarY
+                        ]
+                        (ps
+                            |> Dict.toList
+                            |> List.filter (\( _, p ) -> p.name |> String.toLower |> String.contains (String.toLower filter))
+                            |> List.map viewProjectItem
+                        )
 
             -- , Ui.button
             --     [ Element.alignBottom ]
@@ -837,14 +827,14 @@ viewProjectItem ( id, { name, localName } ) =
             }
         , Ui.button
             [ Element.alignRight ]
-            { onPress = Develop id
-            , label = Element.text "Open in Editor"
+            { onPress = Just (Develop id)
+            , label = Element.text "Develop"
             }
         , Ui.button
             [ Element.alignRight
             , Background.color Color.danger
             ]
-            { onPress = DeleteProject id localName
+            { onPress = Just (DeleteProject id localName)
             , label = Element.text "Delete"
             }
         ]
@@ -885,128 +875,102 @@ viewProjectItem ( id, { name, localName } ) =
 --     ]
 
 
-viewProjectDetails : Id -> Maybe Project -> Element Msg
-viewProjectDetails id maybeProject =
-    Element.el
-        [ Element.height Element.fill
-        , Element.width Element.fill
-        ]
-        (case maybeProject of
-            Nothing ->
-                Ui.button
-                    [ Element.centerX
-                    , Element.centerY
-                    ]
-                    { onPress = ShowNewProjectForm
-                    , label = Element.text "Create New Project"
-                    }
+viewProjectDetails : Id -> Model -> Element Msg
+viewProjectDetails id { projects } =
+    case projects of
+        Loading ->
+            Element.text "Loading Projects..."
 
-            Just { localName, dependencies, building } ->
-                Element.column
-                    [ Element.padding 16
-                    , Element.spacing 16
-                    , Element.height Element.fill
-                    , Element.width Element.fill
-                    ]
-                    [ Element.el
-                        [ Font.size 32
-                        , Font.underline
-                        ]
-                        (Element.text localName)
-                    , Element.row
-                        [ Element.padding 8
-                        , Element.spacing 16
-                        , Background.color Color.primary
-                        ]
-                        [ Ui.button
-                            [ Background.color Color.accentLight ]
-                            { onPress = Develop id
-                            , label = Element.text "Develop"
-                            }
-                        , Ui.button
-                            [ Background.color Color.accentLight ]
-                            { onPress = ViewProjectDetails id
-                            , label = Element.text "Test"
-                            }
-                        , Ui.button
-                            [ Background.color Color.accentLight ]
-                            { onPress =
-                                if building then
-                                    ViewProjectDetails id
+        Failure err ->
+            Element.text ("Failed to load projects: " ++ err)
 
-                                else
-                                    BuildProject id
-                            , label =
-                                Element.text
-                                    (if building then
-                                        "Building..."
+        Success prjs ->
+            case Dict.get id prjs of
+                Nothing ->
+                    Element.text "Unable to find this project, try refreshing your project list."
 
-                                     else
-                                        "Build"
-                                    )
-                            }
-                        , Ui.button
-                            [ Background.color Color.warning ]
-                            { onPress = Eject id
-                            , label = Element.text "Eject"
-                            }
-                        ]
-                    , Element.column
-                        [ Background.color Color.primary
-                        , Element.spacing 16
-                        , Element.padding 8
-                        , Font.color Color.shadeLight
+                Just { name, localName, devServerRunning, building } ->
+                    Element.column
+                        [ Element.width Element.fill
+                        , Element.height Element.fill
                         ]
                         [ Element.row
-                            [ Element.spacing 32 ]
-                            [ Element.text "Dependencies:"
+                            [ Background.color Color.primary
+                            , Element.padding 16
+                            , Element.spacing 16
+                            , Element.width Element.fill
+                            ]
+                            [ Ui.button
+                                []
+                                { onPress = Just ViewProjectList
+                                , label = Element.text "Back"
+                                }
+                            , Element.text (name ++ " Dashboard")
+                            ]
+                        , Element.row
+                            [ Element.spacing 16
+                            , Element.padding 16
+                            ]
+                            [ Ui.button
+                                [ Element.alignRight ]
+                                { onPress = Just (Develop id)
+                                , label = Element.text "Develop"
+                                }
                             , Ui.button
-                                [ Background.color Color.success ]
-                                { onPress = ViewProjectDetails id
-                                , label = Element.text "Add"
+                                [ Background.color Color.accentLight ]
+                                { onPress = Just (ViewProjectDetails id)
+                                , label = Element.text "Test"
+                                }
+                            , Ui.button
+                                [ Background.color Color.accentLight ]
+                                { onPress =
+                                    if building then
+                                        Nothing
+
+                                    else
+                                        Just (BuildProject id)
+                                , label =
+                                    Element.text
+                                        (if building then
+                                            "Building..."
+
+                                         else
+                                            "Build"
+                                        )
+                                }
+                            , Ui.button
+                                [ Background.color Color.warning ]
+                                { onPress = Just (Eject id)
+                                , label = Element.text "Eject"
+                                }
+                            , Ui.button
+                                [ Element.alignRight
+                                , Background.color Color.danger
+                                ]
+                                { onPress = Just (DeleteProject id localName)
+                                , label = Element.text "Delete"
                                 }
                             ]
-                        , let
-                            filteredDependencies =
-                                dependencies
-                                    |> Dict.toList
-                                    |> List.filter (Tuple.second >> .type_ >> (==) Direct)
-                          in
-                          Element.table
-                            []
-                            { data = filteredDependencies
-                            , columns =
-                                [ { header = Element.el [ Element.padding 4 ] (Element.text "Name")
-                                  , width = Element.shrink
-                                  , view = Tuple.first >> Element.text >> Element.el [ Element.padding 4 ]
-                                  }
-                                , { header = Element.el [ Element.padding 4 ] (Element.text "Version")
-                                  , width = Element.shrink
-                                  , view = Tuple.second >> .version >> stringFromVersion >> Element.text >> Element.el [ Element.padding 4 ]
-                                  }
-                                , { header = Element.el [ Element.padding 4 ] (Element.text "License")
-                                  , width = Element.shrink
-                                  , view = Tuple.second >> .license >> Element.text >> Element.el [ Element.padding 4 ]
-                                  }
+                        , if devServerRunning then
+                            Element.row
+                                [ Element.spacing 4
+                                , Element.padding 16
                                 ]
-                            }
+                                [ Element.text "Develpment server running: "
+                                , Ui.button
+                                    [ Element.alignRight ]
+                                    { onPress = Just (StopServer id)
+                                    , label = Element.text "Stop"
+                                    }
+                                ]
+
+                          else
+                            Element.none
                         ]
 
-                    -- Delete button is always last
-                    , Ui.button
-                        [ Element.alignBottom
-                        , Element.alignRight
-                        , Background.color Color.danger
-                        ]
-                        { onPress = DeleteProject id localName
-                        , label = Element.text "Delete"
-                        }
-                    ]
-        )
 
-
-viewSettings : SharedModel -> Element Msg
-viewSettings _ =
+viewSettings : Element Msg
+viewSettings =
     Element.column
         [ Background.color Color.primary
         , Element.spacing 16
@@ -1019,7 +983,7 @@ viewSettings _ =
             [ Element.alignBottom
             , Element.alignRight
             ]
-            { onPress = HideSettings
+            { onPress = Just HideSettings
             , label = Element.text "Back"
             }
         ]
@@ -1152,12 +1116,12 @@ viewNewProject projectBuilder =
             ]
             [ Ui.button
                 []
-                { onPress = HideNewProjectForm
+                { onPress = Just HideNewProjectForm
                 , label = Element.text "Cancel"
                 }
             , Ui.button
                 [ Background.color Color.success ]
-                { onPress = CreateNewProject
+                { onPress = Just CreateNewProject
                 , label =
                     Element.text <|
                         if creating then
