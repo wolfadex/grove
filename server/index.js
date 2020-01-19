@@ -158,14 +158,14 @@ async function loadProject(projectPath) {
     // );
     // const { name } = JSON.parse(packageJsonContents);
     const groverc = await fs.readFile(path.resolve(projectPath, ".groverc"));
-    const { icon, name, author } = JSON.parse(groverc);
+    const { name, author } = JSON.parse(groverc);
     // const elmJsonContents = await fs.readFile(
     //   path.resolve(projectPath, elmJson.name),
     // );
     // const { dependencies } = JSON.parse(elmJsonContents);
     const dependencies = elmLicenseFinder(projectPath);
 
-    return { projectPath, projectName: name, icon, dependencies, author };
+    return { projectPath, projectName: name, dependencies, author };
   } catch (error) {
     throw new Error(error);
   }
@@ -407,6 +407,13 @@ ipcMain.on("client-to-main", async function(_, { action, payload }) {
             production: true,
           });
 
+          bundler.on("bundled", function(bundle) {
+            sendToClient("PROJECT_BUNDLE", {
+              projectPath: payload,
+              bundle: parseBundle(bundle),
+            });
+          });
+
           await bundler.bundle();
           shell.showItemInFolder(path.join(payload, "dist"));
           sendToClient("PROJECT_BUILT", payload);
@@ -424,4 +431,19 @@ function sendToClient(action, payload) {
   if (mainWindow != null && mainWindow.webContents) {
     mainWindow.webContents.send("main-to-client", { action, payload });
   }
+}
+
+function parseBundle(bundle) {
+  const children = [];
+
+  if (bundle.childBundles) {
+    for (let [child] of bundle.childBundles.entries()) {
+      children.push(parseBundle(child));
+    }
+  }
+
+  return {
+    ...bundle,
+    children,
+  };
 }

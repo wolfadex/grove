@@ -68,11 +68,6 @@ This project was created with [Grove](https://github.com/wolfadex/grove).`;
 
 function groverc(name, author) {
   return `{
-  "icon": {
-    "style": "random",
-    "angle": ${Math.floor(Math.random() * 9)},
-    "color": ${JSON.stringify(randomColor())}
-  },
   "name": "${name}",
   "author": "${author}",
   "tests": {
@@ -90,14 +85,6 @@ function elmDocs(name, author, description) {
     "Main"
   ]
 }`;
-}
-
-function randomColor() {
-  const red = Math.floor(Math.random() * 256);
-  const blue = Math.floor(Math.random() * 256);
-  const green = Math.floor(Math.random() * 256);
-
-  return { red, green, blue };
 }
 
 // Elm Templates

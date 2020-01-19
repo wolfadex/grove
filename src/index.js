@@ -8,5 +8,6 @@ app.ports.clientToMain.subscribe(function(args) {
 });
 
 ipcRenderer.on("main-to-client", function(_, args) {
+  if (args.action === "PROJECT_BUNDLE") console.log(args.payload);
   app.ports.mainToClient.send(args);
 });

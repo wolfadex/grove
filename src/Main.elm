@@ -2,14 +2,13 @@ port module Main exposing (main)
 
 import Browser
 import Dict exposing (Dict)
-import Element exposing (Color, Element)
+import Element exposing (Element)
 import Element.Background as Background
 import Element.Border as Border
 import Element.Font as Font
 import Element.Input as Input
 import Element.Keyed as Keyed
 import Html exposing (Html)
-import Html.Attributes
 import Json.Decode exposing (Decoder, Value)
 import Json.Encode
 import Ui
@@ -204,10 +203,10 @@ type alias Project =
     , localName : String
     , name : String
     , author : String
-    , icon : Icon
     , dependencies : Dict Name Dependency
     , building : Bool
     , devServerRunning : Bool
+    , bundle : Maybe Bundle
     }
 
 
@@ -227,6 +226,16 @@ type DependencyType
     | Indirect
 
 
+type Bundle
+    = Bundle
+        { label : String
+        , path : String
+        , children : List Bundle
+        , size : Int
+        , time : Int
+        }
+
+
 type alias Version =
     { major : Int
     , minor : Int
@@ -241,10 +250,6 @@ stringFromVersion { major, minor, patch } =
     , String.fromInt patch
     ]
         |> String.join "."
-
-
-type Icon
-    = RandomIcon { angle : Int, color : Color }
 
 
 type Msg
@@ -574,8 +579,87 @@ update msg model =
                                 Err _ ->
                                     ( model, Cmd.none )
 
+                        "PROJECT_BUNDLE" ->
+                            case Json.Decode.decodeValue decodeNewBundle payload of
+                                Ok ( id, bundle ) ->
+                                    let
+                                        updatedProjects =
+                                            updateProjects id (Maybe.map (\p -> { p | bundle = Just bundle })) model.projects
+                                    in
+                                    ( { model | projects = updatedProjects }
+                                    , case updatedProjects of
+                                        Success projects ->
+                                            case Dict.get id projects of
+                                                Nothing ->
+                                                    Cmd.none
+
+                                                Just project ->
+                                                    toMain "SAVE_PROJECT_STATE" (encodeProject id project)
+
+                                        _ ->
+                                            Cmd.none
+                                    )
+
+                                Err err ->
+                                    Debug.todo ("Decode bundle error: " ++ Json.Decode.errorToString err)
+
                         _ ->
                             Debug.todo ("Unhandled message from Main: " ++ action ++ ", " ++ Debug.toString payload)
+
+
+decodeNewBundle : Decoder ( Id, Bundle )
+decodeNewBundle =
+    Json.Decode.field "projectPath" Json.Decode.string
+        |> Json.Decode.andThen
+            (\id ->
+                Json.Decode.field "bundle" (decodeBundle id)
+                    |> Json.Decode.andThen
+                        (\bundle -> Json.Decode.succeed ( id, bundle ))
+            )
+
+
+decodeBundle : Id -> Decoder Bundle
+decodeBundle id =
+    Json.Decode.map4
+        (\name children size time ->
+            Bundle
+                { label = String.replace (id ++ "/dist/") "" name
+                , path = name
+                , children = children
+                , size = size
+                , time = time
+                }
+        )
+        (Json.Decode.field "name" Json.Decode.string)
+        (Json.Decode.field
+            "children"
+            (Json.Decode.list
+                (Json.Decode.lazy (\_ -> decodeBundle id))
+                |> Json.Decode.map (List.filter (\(Bundle { label }) -> not (String.endsWith ".map" label)))
+            )
+        )
+        (Json.Decode.field "totalSize" Json.Decode.int)
+        (Json.Decode.field "bundleTime" Json.Decode.int)
+
+
+encodeBundle : Bundle -> Value
+encodeBundle (Bundle { label, path, children, size, time }) =
+    Json.Encode.object
+        [ ( "label", Json.Encode.string label )
+        , ( "path", Json.Encode.string path )
+        , ( "totalSize", Json.Encode.int size )
+        , ( "bundleTime", Json.Encode.int time )
+        , ( "children", Json.Encode.list encodeBundle children )
+        ]
+
+
+
+-- { label : String
+-- , path : String
+-- , children : Dict String Bundle
+-- , totalSize : Int
+-- , bundleTime : Int
+-- }
 
 
 updateProjects : Id -> (Maybe Project -> Maybe Project) -> Loadable (Dict Id Project) -> Loadable (Dict Id Project)
@@ -610,15 +694,42 @@ decodeProjects =
 
 decodeProject : Decoder Project
 decodeProject =
-    Json.Decode.map8 Project
-        (Json.Decode.field "projectPath" Json.Decode.string)
-        (Json.Decode.field "directoryName" Json.Decode.string)
-        (Json.Decode.field "projectName" Json.Decode.string)
-        (Json.Decode.field "author" Json.Decode.string)
-        (Json.Decode.field "icon" decodeIcon)
-        (Json.Decode.field "dependencies" decodeDependencies)
-        (Json.Decode.succeed False)
-        (Json.Decode.succeed False)
+    Json.Decode.field "projectPath" Json.Decode.string
+        |> Json.Decode.andThen
+            (\path ->
+                Json.Decode.map5
+                    (\localName name author dependencies bundle ->
+                        { path = path
+                        , localName = localName
+                        , name = name
+                        , author = author
+                        , dependencies = dependencies
+                        , building = False
+                        , devServerRunning = False
+                        , bundle = bundle
+                        }
+                    )
+                    (Json.Decode.field "directoryName" Json.Decode.string)
+                    (Json.Decode.field "projectName" Json.Decode.string)
+                    (Json.Decode.field "author" Json.Decode.string)
+                    (Json.Decode.field "dependencies" decodeDependencies)
+                    (Json.Decode.maybe (Json.Decode.field "bundle" (decodeBundle path)))
+            )
+
+
+encodeProject : Id -> Project -> Value
+encodeProject id { bundle } =
+    Json.Encode.object
+        [ ( "projectPath", Json.Encode.string id )
+        , ( "bundle"
+          , case bundle of
+                Nothing ->
+                    Json.Encode.null
+
+                Just b ->
+                    encodeBundle b
+          )
+        ]
 
 
 decodeDependencies : Decoder (Dict Name Dependency)
@@ -672,44 +783,6 @@ decodeVersion =
                     _ ->
                         Json.Decode.fail "The version must be in the format 'Int.Int.Int'"
             )
-
-
-decodeIcon : Decoder Icon
-decodeIcon =
-    Json.Decode.field "style" Json.Decode.string
-        |> Json.Decode.andThen
-            (\style ->
-                case style of
-                    "random" ->
-                        decodeRandomIcon
-
-                    _ ->
-                        Json.Decode.fail ("Unknown icon style: " ++ style)
-            )
-
-
-decodeRandomIcon : Decoder Icon
-decodeRandomIcon =
-    Json.Decode.map2
-        (\angle color ->
-            RandomIcon
-                { angle = angle
-                , color = color
-                }
-        )
-        (Json.Decode.field "angle" Json.Decode.int)
-        (Json.Decode.field "color" decodeIconColor)
-
-
-decodeIconColor : Decoder Color
-decodeIconColor =
-    Json.Decode.map3
-        (\red green blue ->
-            Element.rgb255 red green blue
-        )
-        (Json.Decode.field "red" Json.Decode.int)
-        (Json.Decode.field "green" Json.Decode.int)
-        (Json.Decode.field "blue" Json.Decode.int)
 
 
 
@@ -841,40 +914,6 @@ viewProjectItem ( id, { name, localName } ) =
     )
 
 
-
--- Element.row
---     [ Element.height Element.fill
---     , Element.width Element.fill
---     ]
---     [ Element.column
---         [ Background.color Color.primary
---         , Element.padding 8
---         , Element.spacing 16
---         , Element.height Element.fill
---         ]
---         [ Ui.button
---             [ Element.centerX ]
---             { onPress = ShowNewProjectForm
---             , label = Element.text "+"
---             }
---         , Keyed.column
---             [ Element.spacing 8
---             , Element.centerX
---             ]
---             (projects
---                 |> Dict.toList
---                 |> List.map (viewProjectButton activeProject)
---             )
---         , Ui.button
---             [ Element.alignBottom ]
---             { onPress = ShowSettings
---             , label = Element.text "Settings"
---             }
---         ]
---     , viewProjectDetails activeProject (Dict.get activeProject projects)
---     ]
-
-
 viewProjectDetails : Id -> Model -> Element Msg
 viewProjectDetails id { projects } =
     case projects of
@@ -889,7 +928,7 @@ viewProjectDetails id { projects } =
                 Nothing ->
                     Element.text "Unable to find this project, try refreshing your project list."
 
-                Just { name, localName, devServerRunning, building } ->
+                Just { name, localName, devServerRunning, building, bundle } ->
                     Element.column
                         [ Element.width Element.fill
                         , Element.height Element.fill
@@ -966,6 +1005,15 @@ viewProjectDetails id { projects } =
 
                           else
                             Element.none
+                        , case bundle of
+                            Nothing ->
+                                Element.none
+
+                            Just (Bundle b) ->
+                                --{ label, path, children, size, time }) ->
+                                Element.column
+                                    []
+                                    [ Element.text (Debug.toString b) ]
                         ]
 
 
@@ -987,70 +1035,6 @@ viewSettings =
             , label = Element.text "Back"
             }
         ]
-
-
-viewProjectButton : Id -> ( Id, Project ) -> ( String, Element Msg )
-viewProjectButton activeProjectId ( id, { icon } ) =
-    ( id
-    , Input.button
-        [ Element.height (Element.px 64)
-        , Element.width (Element.px 64)
-        , Border.rounded 3
-        , Element.clip
-        , Border.solid
-        , Border.color Color.shadeDark
-        , if activeProjectId == id then
-            Border.width 4
-
-          else
-            Border.width 0
-        ]
-        { onPress = Just (ViewProjectDetails id)
-        , label =
-            case icon of
-                RandomIcon { angle, color } ->
-                    Element.html <|
-                        Html.div
-                            [ Html.Attributes.style "height" "100%"
-                            , Html.Attributes.style "width" "100%"
-                            , Html.Attributes.style "background-size" "32px 32px"
-                            , color
-                                |> colorToHtml255String
-                                |> Html.Attributes.style "background-color"
-                            , Html.Attributes.style "background-image"
-                                ("linear-gradient("
-                                    ++ String.fromInt (angle * 45)
-                                    ++ "deg, rgba(255, 255, 255, .2) 25%, transparent 25%, transparent 50%, rgba(255, 255, 255, .2) 50%, rgba(255, 255, 255, .2) 75%, transparent 75%, transparent)"
-                                )
-                            ]
-                            []
-        }
-    )
-
-
-colorToHtml255String : Color -> String
-colorToHtml255String =
-    Element.toRgb
-        >> (\{ red, green, blue, alpha } ->
-                "rgba("
-                    ++ (red |> floatTo255 |> String.fromInt)
-                    ++ ","
-                    ++ (green |> floatTo255 |> String.fromInt)
-                    ++ ","
-                    ++ (blue |> floatTo255 |> String.fromInt)
-                    ++ ","
-                    ++ String.fromFloat alpha
-                    ++ ")"
-           )
-
-
-floatTo255 : Float -> Int
-floatTo255 float =
-    float
-        * 256
-        |> floor
-        |> min 255
-        |> max 0
 
 
 viewNewProject : NewProjectBuilder -> Element Msg
