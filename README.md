@@ -17,10 +17,11 @@ A tool for those who don't like to or don't want to use the command line for the
 - [ ] Run tests
 - [x] Build for production
 - [ ] Manage Elm dependencies
-  - [x] Display dependencies
+  - [ ] Display dependencies
   - [ ] Add dependency
   - [ ] Remove dependency
   - [ ] Upgrade dependency
+- [ ] Show stats for prod builds
 https://github.com/wolfadex/grove#supported-editors
 ## Supported Editors:
 
@@ -45,3 +46,26 @@ https://github.com/wolfadex/grove#supported-editors
 | `webstorm`      | [WebStorm](https://www.jetbrains.com/webstorm/)                        |   ✓   |    ✓    |   ✓   |
 
 *Based on the editors that [launch-editor](https://github.com/yyx990803/launch-editor) supports.
+
+## Contributing
+
+Any and all contributions are welcome!
+
+### Development Build
+
+- Clone repo
+- Run `yarn` to install dependencies
+- Run `yarn dev` to start the app in development mode
+
+The app has 2 main parts, the server (written in JS/Node) and the client (written in Elm). The client does most of the work, only calling back to the server when it needs data from disk or needs to write to disk.
+
+The current structure of a project made with Grove is:
+- a minimal html file that points to a javascript file
+- a minimal javascript file that loads an elm file
+- a minimal elm file based off 1 of the 4 Browser programs
+
+This is then built with [Parcel](https://parceljs.org/). The project is by default stored within the directory structure of Gove, which allows Parcel to use the already installed `node_modules` making for super fast startup of new projects.
+
+### Production Build
+
+Thre aren't any production builds yet as this is still a work in progress, pre-alpha.
