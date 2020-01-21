@@ -8,6 +8,7 @@ import Element.Border as Border
 import Element.Font as Font
 import Element.Input as Input
 import Element.Keyed as Keyed
+import Filesize
 import Html exposing (Html)
 import Json.Decode exposing (Decoder, Value)
 import Json.Encode
@@ -481,9 +482,9 @@ update msg model =
                                     ( { model | projects = Success projects }, Cmd.none )
 
                                 Err err ->
-                                    -- Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
-                                    ( model, Cmd.none )
+                                    Debug.todo ("Handle error: " ++ Json.Decode.errorToString err)
 
+                        --( model, Cmd.none )
                         "LOAD_PROJECT" ->
                             case Json.Decode.decodeValue decodeProjects payload of
                                 Ok project ->
@@ -646,7 +647,7 @@ encodeBundle : Bundle -> Value
 encodeBundle (Bundle { label, path, children, size, time }) =
     Json.Encode.object
         [ ( "label", Json.Encode.string label )
-        , ( "path", Json.Encode.string path )
+        , ( "name", Json.Encode.string path )
         , ( "totalSize", Json.Encode.int size )
         , ( "bundleTime", Json.Encode.int time )
         , ( "children", Json.Encode.list encodeBundle children )
@@ -706,7 +707,7 @@ decodeProject =
                         , dependencies = dependencies
                         , building = False
                         , devServerRunning = False
-                        , bundle = bundle
+                        , bundle = Debug.log "bundle" bundle
                         }
                     )
                     (Json.Decode.field "directoryName" Json.Decode.string)
@@ -1009,12 +1010,65 @@ viewProjectDetails id { projects } =
                             Nothing ->
                                 Element.none
 
-                            Just (Bundle b) ->
-                                --{ label, path, children, size, time }) ->
+                            Just root ->
                                 Element.column
-                                    []
-                                    [ Element.text (Debug.toString b) ]
+                                    [ Element.width (Element.px 600)
+                                    , Element.padding 16
+                                    ]
+                                    [ Element.text "Production Build Size:"
+                                    , Element.row
+                                        [ Element.width Element.fill
+                                        ]
+                                        [ icicle
+                                            { root = root
+                                            , label =
+                                                \(Bundle { label, size }) ->
+                                                    Element.row
+                                                        [ Element.padding 8
+                                                        , Element.width Element.fill
+                                                        ]
+                                                        [ Element.text label, Element.el [ Element.alignRight ] (Element.text (Filesize.format size)) ]
+                                            , parentSize = totalWithChildren root
+                                            , size = totalWithChildren
+                                            , percent = \parentSize b -> totalWithChildren b * 100 // parentSize
+                                            , children = \(Bundle { children }) -> children
+                                            }
+                                        ]
+                                    ]
                         ]
+
+
+icicle : { root : a, label : a -> Element Msg, parentSize : Int, size : a -> Int, percent : Int -> a -> Int, children : a -> List a } -> Element Msg
+icicle ({ root, label, parentSize, size, percent, children } as base) =
+    let
+        fillPercent =
+            percent parentSize root
+    in
+    Element.column
+        [ Element.width (Element.fillPortion fillPercent), Element.alignTop ]
+        [ Element.el
+            [ Element.width Element.fill
+            , Element.height (Element.fill |> Element.minimum 10)
+            , Background.color (Element.rgba255 0 196 255 0.5)
+            , Border.solid
+            , Border.width 1
+            , Element.padding 4
+            ]
+            (label root)
+        , Element.row
+            [ Element.width Element.fill ]
+            (List.map
+                (\item ->
+                    icicle { base | root = item, parentSize = size item }
+                )
+                (children root)
+            )
+        ]
+
+
+totalWithChildren : Bundle -> Int
+totalWithChildren (Bundle { size, children }) =
+    List.foldl (\child total -> totalWithChildren child + total) size children
 
 
 viewSettings : Element Msg

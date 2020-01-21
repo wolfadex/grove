@@ -25,6 +25,7 @@ function createWindow(startupConfig) {
     y,
     webPreferences: {
       nodeIntegration: true,
+      webSecurity: false,
       // preload: path.join(__dirname, "preload.js"),
     },
   });
@@ -41,7 +42,6 @@ function createWindow(startupConfig) {
   }
 
   mainWindow.webContents.on("did-finish-load", function() {
-    // sendToClient("MAIN_STARTED", { editor });
     loadProjects();
   });
 
@@ -157,15 +157,13 @@ async function loadProject(projectPath) {
     //   path.resolve(projectPath, packageJson.name),
     // );
     // const { name } = JSON.parse(packageJsonContents);
-    const groverc = await fs.readFile(path.resolve(projectPath, ".groverc"));
-    const { name, author } = JSON.parse(groverc);
-    // const elmJsonContents = await fs.readFile(
-    //   path.resolve(projectPath, elmJson.name),
-    // );
-    // const { dependencies } = JSON.parse(elmJsonContents);
+    const groverc = await fs.readFile(path.resolve(projectPath, ".groverc"), {
+      encoding: "utf8",
+    });
+    const { name, author, bundle } = JSON.parse(groverc);
     const dependencies = elmLicenseFinder(projectPath);
 
-    return { projectPath, projectName: name, dependencies, author };
+    return { projectPath, projectName: name, dependencies, author, bundle };
   } catch (error) {
     throw new Error(error);
   }
@@ -363,6 +361,7 @@ ipcMain.on("client-to-main", async function(_, { action, payload }) {
           // Add remaining files needed for an ejected project
           const groverc = await fs.readFile(
             path.resolve(PROJECTS_ROOT, payload, ".groverc"),
+            { encoding: "utf8" },
           );
           const { name } = JSON.parse(groverc);
           // Copy over eject files
@@ -422,6 +421,29 @@ ipcMain.on("client-to-main", async function(_, { action, payload }) {
           sendToClient("PROJECT_BUILD_ERROR", { projectPath: payload, error });
         }
         // TODO: Should more happen here? Maybe hookup to a static host?
+      }
+      break;
+    case "SAVE_PROJECT_STATE":
+      {
+        const { projectPath, bundle } = payload;
+
+        try {
+          const groverc = await fs.readFile(
+            path.resolve(projectPath, ".groverc"),
+            { encoding: "utf8" },
+          );
+          const parsedGroverc = JSON.parse(groverc);
+
+          await fs.writeFile(
+            path.resolve(projectPath, ".groverc"),
+            JSON.stringify({
+              ...parsedGroverc,
+              bundle,
+            }),
+          );
+        } catch (err) {
+          devLog("Error updating project", err);
+        }
       }
       break;
   }
