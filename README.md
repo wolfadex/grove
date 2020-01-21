@@ -8,6 +8,8 @@ A tool for those who don't like to or don't want to use the command line for the
 
 ![project create](project_create.png)
 
+![project dashboard](project_dashboard.png)
+
 ## Features:
 
 - [x] Create project
